@@ -10,17 +10,21 @@
 //  Created by Mike Lischke on 13.03.16.
 //
 
+#include <any>
 #include <iostream>
+#include <memory>
 
-#include "../runtime/src/antlr4-runtime.h"
-#include "../generated/ANTLR/TLexer.h"
-#include "../generated/ANTLR/TParser.h"
+#include "antlr4-runtime.h"
+#include "./ANTLR/TLexer.h"
+#include "./ANTLR/TParser.h"
+#include "./front/ASTBuilder.h"
+#include "./front/AST.h"
 
 using namespace antlrcpptest;
 using namespace antlr4;
 
 int main(int , const char **) {
-  ANTLRInputStream input("a + (x * (y ? 0 : 1) + z);");
+  ANTLRInputStream input("int a;");
   TLexer lexer(&input);
   CommonTokenStream tokens(&lexer);
 
@@ -31,6 +35,16 @@ int main(int , const char **) {
 
   TParser parser(&tokens);
   tree::ParseTree* tree = parser.translationUnit();
+
+  rcc::ASTBuilder builder;
+  auto tu = std::any_cast<std::shared_ptr<ast::TranslationUnit>>(builder.visit(tree));
+  auto extDecl = tu->externalDecls[0];
+
+  if(std::dynamic_pointer_cast<std::shared_ptr<ast::FunctionDef>>(extDecl))
+    std::cout << "funcDef";
+  else if(std::dynamic_pointer_cast<std::shared_ptr<ast::Declaration>>(extDecl))
+    std::cout << "declaration";
+  else std::cout << "no match";
 
   std::cout << tree->toStringTree(&parser) << std::endl << std::endl;
 

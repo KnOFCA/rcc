@@ -32,7 +32,7 @@ build() {
 
     echo "==> Configuring with CMake..."
     cd "$BUILD_DIR"
-    cmake ..
+    cmake -DCMAKE_BUILD_TYPE=Debug ..
 
     echo "==> Building..."
     make

@@ -1,7 +1,9 @@
 # -*- mode:cmake -*-
 
+cmake_minimum_required(VERSION 3.12)
 project(rcc)
-cmake_minimum_required(VERSION 3.10)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT UNIX)
   message(WARNING "Unsupported operating system")
@@ -42,6 +44,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/runtime/src/tree
   ${PROJECT_SOURCE_DIR}/runtime/src/support
   ${PROJECT_SOURCE_DIR}/generated
+  ${PROJECT_SOURCE_DIR}/src
   )
 
 #file(GLOB antlr4-demo_SRC "${PROJECT_SOURCE_DIR}/generated/ANTLR/*")
@@ -49,6 +52,11 @@ set(antlr4-demo_SRC
   ${PROJECT_SOURCE_DIR}/src/main.cpp
   ${antlr4-demo-GENERATED_SRC}
   )
+
+file(GLOB FRONT_SRCS CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/front/*.cpp"
+)
+list(APPEND antlr4-demo_SRC ${FRONT_SRCS})
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   set (flags_1 "-Wno-overloaded-virtual")
