@@ -201,26 +201,6 @@ struct Declarator : ASTNode {
 };
 
 /* ============================================================
- *  Declarations / definitions
- * ============================================================ */
-
-struct InitDeclarator : ASTNode {
-    std::shared_ptr<Declarator> declarator;
-    AST initializer; // Expr or initializer-list
-};
-
-struct Declaration : ExternalDecl {
-    std::shared_ptr<DeclSpec> specs;
-    std::vector<std::shared_ptr<InitDeclarator>> initDeclarators;
-};
-
-struct FunctionDef : ExternalDecl {
-    std::shared_ptr<DeclSpec> specs;
-    std::shared_ptr<Declarator> declarator;
-    AST body; // CompoundStmt
-};
-
-/* ============================================================
  *  Initializers
  * ============================================================ */
 
@@ -233,6 +213,26 @@ struct ExprInitializer : Initializer {
 
 struct InitList : Initializer {
     std::vector<std::shared_ptr<Initializer>> elements;
+};
+
+/* ============================================================
+ *  Declarations / definitions
+ * ============================================================ */
+
+struct InitDeclarator : ASTNode {
+    std::shared_ptr<Declarator> declarator;
+    std::shared_ptr<Initializer> initializer; // Expr or initializer-list
+};
+
+struct Declaration : ExternalDecl {
+    std::shared_ptr<DeclSpec> specs;
+    std::vector<std::shared_ptr<InitDeclarator>> initDeclarators;
+};
+
+struct FunctionDef : ExternalDecl {
+    std::shared_ptr<DeclSpec> specs;
+    std::shared_ptr<Declarator> declarator;
+    AST body; // CompoundStmt
 };
 
 /* ============================================================

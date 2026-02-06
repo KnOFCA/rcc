@@ -320,7 +320,7 @@ std::any ASTBuilder::visitParameterDeclaration(TParser::ParameterDeclarationCont
         auto v = visit(ctx->declarator());
         paraDecl->declarator = std::any_cast<ast::AST>(v);
     }
-    
+
     return paraDecl;
 }
 
@@ -328,12 +328,31 @@ std::any ASTBuilder::visitParameterDeclaration(TParser::ParameterDeclarationCont
 /* Initializers                                                */
 /* ============================================================ */
 
+// return ExprInitializer or InitList
 std::any ASTBuilder::visitInitializer(TParser::InitializerContext *ctx) {
-    return visitChildren(ctx);
+    if(ctx->assignmentExpression()){
+        auto exprInit = std::make_shared<ast::ExprInitializer>();
+        auto v = visit(ctx->assignmentExpression());
+        exprInit->expr = std::any_cast<ast::AST>(v);
+        return std::static_pointer_cast<ast::Initializer>(exprInit);
+    }
+    if(ctx->initializerList()){
+        auto initList = std::make_shared<ast::InitList>();
+        auto v = visit(ctx->initializerList());
+        initList->elements = std::any_cast<std::vector<std::shared_ptr<ast::Initializer>>>(v);
+        return std::static_pointer_cast<ast::Initializer>(initList);
+    }
+    return nullptr;
 }
 
 std::any ASTBuilder::visitInitializerList(TParser::InitializerListContext *ctx) {
-    return visitChildren(ctx);
+    auto ele = std::vector<std::shared_ptr<ast::Initializer>>(ctx->initializer().size());
+    std::transform(ctx->initializer().begin(), ctx->initializer().end(), ele.begin(),
+        [&](TParser::InitializerContext *ctxx)-> std::shared_ptr<ast::Initializer>{
+            return std::any_cast<std::shared_ptr<ast::Initializer>>(visitInitializer(ctxx));
+        });
+        
+    return ele;
 }
 
 /* ============================================================ */
