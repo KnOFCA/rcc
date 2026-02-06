@@ -170,7 +170,7 @@ struct DeclSpec : ASTNode {
  * ============================================================ */
 
 struct Pointer : ASTNode {
-    std::vector<std::string> qualifiers;   // const / volatile / restrict / atomic
+    std::vector<std::shared_ptr<TypeQualifierSpec>> qualifiers;   // const / volatile / restrict / atomic
     std::shared_ptr<Pointer> next;
 };
 

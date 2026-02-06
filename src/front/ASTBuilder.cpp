@@ -3,6 +3,7 @@
 #include "FrontSymtab.h"
 #include <any>
 #include <memory>
+#include <algorithm>
 
 using namespace rcc;
 
@@ -163,6 +164,7 @@ std::any ASTBuilder::visitTypeQualifier(TParser::TypeQualifierContext *ctx) {
     return std::static_pointer_cast<ast::DeclSpecifier>(TypeQual);
 }
 
+//TODO
 /* ============================================================ */
 /* Struct / Union / Enum                                       */
 /* ============================================================ */
@@ -208,23 +210,87 @@ std::any ASTBuilder::visitEnumerator(TParser::EnumeratorContext *ctx) {
 /* ============================================================ */
 
 std::any ASTBuilder::visitInitDeclaratorList(TParser::InitDeclaratorListContext *ctx) {
-    return visitChildren(ctx);
+    std::vector<std::shared_ptr<ast::InitDeclarator>> IDeclList(ctx->initDeclarator().size());
+
+    std::transform(ctx->initDeclarator().begin(), ctx->initDeclarator().end(), IDeclList, [&](TParser::InitDeclaratorContext *ctxx)-> std::shared_ptr<ast::InitDeclarator>{
+        return std::any_cast<std::shared_ptr<ast::InitDeclarator>>(visitInitDeclarator(ctxx));
+    });
+
+    return IDeclList;
 }
 
 std::any ASTBuilder::visitInitDeclarator(TParser::InitDeclaratorContext *ctx) {
-    return visitChildren(ctx);
+    auto IDecl = std::make_shared<ast::InitDeclarator>();
+    IDecl->declarator = std::any_cast<std::shared_ptr<ast::Declarator>>(visit(ctx->declarator()));
+
+    //CHECK
+    if(ctx->initializer())
+        IDecl->initializer = std::any_cast<ast::AST>(visit(ctx->initializer()));
+
+    return IDecl;
 }
 
 std::any ASTBuilder::visitDeclarator(TParser::DeclaratorContext *ctx) {
-    return visitChildren(ctx);
+    auto decl = std::make_shared<ast::Declarator>();
+
+    if(ctx->pointer())
+    {
+        auto v = visit(ctx->pointer());
+        decl->pointer = std::any_cast<std::shared_ptr<ast::Pointer>>(v);
+    }
+
+    {
+        auto v = visit(ctx->directDeclarator());
+        decl->direct = std::any_cast<std::shared_ptr<ast::DirectDeclarator>>(v);
+    }
+    return decl;
 }
 
 std::any ASTBuilder::visitDirectDeclarator(TParser::DirectDeclaratorContext *ctx) {
-    return visitChildren(ctx);
+    if(ctx->Identifier()){
+        auto id = std::make_shared<ast::DDIdentifier>();
+        id->name = ctx->Identifier()->getText();
+        return std::static_pointer_cast<ast::DirectDeclarator>(id);
+    }
+    
+    if(ctx->declarator()){
+        auto paren = std::make_shared<ast::DDParen>();
+        auto v = visit(ctx->declarator());
+        paren->inner = std::any_cast<ast::AST>(v);
+        return std::static_pointer_cast<ast::DirectDeclarator>(paren);
+    }
+
+    if(ctx->parameterTypeList() || ctx->directDeclarator()){
+        auto call =  std::make_shared<ast::DDCall>();
+        {
+            auto v = visit(ctx->directDeclarator());
+            //CHECK
+            call->base = std::any_cast<ast::AST>(v);
+        }
+        if(ctx->parameterTypeList()){
+            auto v = visit(ctx->parameterTypeList());
+            call->params = std::any_cast<std::vector<std::shared_ptr<ast::ParameterDecl>>>(v);
+        }
+        return std::static_pointer_cast<ast::DirectDeclarator>(call);
+    }
+
+    return nullptr;
 }
 
 std::any ASTBuilder::visitPointer(TParser::PointerContext *ctx) {
-    return visitChildren(ctx);
+    auto ptr = std::make_shared<ast::Pointer>();
+    ptr->qualifiers.reserve(ctx->typeQualifier().size());
+    std::transform(ctx->typeQualifier().begin(), ctx->typeQualifier().end(),
+        std::back_inserter(ptr->qualifiers),
+        [&](TParser::TypeQualifierContext *ctxx)-> std::shared_ptr<ast::TypeQualifierSpec>{
+            //CHECK: any_cast
+            return std::any_cast<std::shared_ptr<ast::TypeQualifierSpec>>(visitTypeQualifier(ctxx));
+        });
+    if(ctx->pointer()){
+        auto v = visit(ctx->pointer());
+        ptr->next = std::any_cast<std::shared_ptr<ast::Pointer>>(v);
+    }
+    return ptr;
 }
 
 std::any ASTBuilder::visitParameterTypeList(TParser::ParameterTypeListContext *ctx) {
@@ -232,11 +298,30 @@ std::any ASTBuilder::visitParameterTypeList(TParser::ParameterTypeListContext *c
 }
 
 std::any ASTBuilder::visitParameterList(TParser::ParameterListContext *ctx) {
-    return visitChildren(ctx);
+    auto paraDecls = std::vector<std::shared_ptr<ast::ParameterDecl>>(ctx->parameterDeclaration().size());
+
+    std::transform(ctx->parameterDeclaration().begin(), ctx->parameterDeclaration().end(), paraDecls.begin(),
+        [&](TParser::ParameterDeclarationContext *ctxx)-> std::shared_ptr<ast::ParameterDecl>{
+            return std::any_cast<std::shared_ptr<ast::ParameterDecl>>(visitParameterDeclaration(ctxx));
+        });
+    
+    return paraDecls;
 }
 
 std::any ASTBuilder::visitParameterDeclaration(TParser::ParameterDeclarationContext *ctx) {
-    return visitChildren(ctx);
+    auto paraDecl = std::make_shared<ast::ParameterDecl>();
+
+    {
+        auto v = visit(ctx->declarationSpecifiers());
+        paraDecl->specs = std::any_cast<std::shared_ptr<ast::DeclSpec>>(v);
+    }
+
+    {
+        auto v = visit(ctx->declarator());
+        paraDecl->declarator = std::any_cast<ast::AST>(v);
+    }
+    
+    return paraDecl;
 }
 
 /* ============================================================ */
