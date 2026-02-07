@@ -1,18 +1,7 @@
-/* Copyright (c) 2012-2017 The ANTLR Project. All rights reserved.
- * Use of this file is governed by the BSD 3-clause license that
- * can be found in the LICENSE.txt file in the project root.
- */
-
-//
-//  main.cpp
-//  antlr4-cpp-demo
-//
-//  Created by Mike Lischke on 13.03.16.
-//
-
 #include <any>
 #include <iostream>
 #include <memory>
+#include <fstream>
 
 #include "antlr4-runtime.h"
 #include "./ANTLR/TLexer.h"
@@ -23,14 +12,26 @@
 using namespace antlrcpptest;
 using namespace antlr4;
 
-int main(int , const char **) {
-  ANTLRInputStream input("int a;");
+int main(int argc, const char **argv) {
+  std::ifstream file;
+  std::istream *inputStream = &std::cin; // default to stdin
+  
+  if (argc > 1) {
+      file.open(argv[1]);
+      if (!file.is_open()) {
+          std::cerr << "can not open file: " << argv[1] << std::endl;
+          return 1;
+      }
+      inputStream = &file;
+  }
+  
+  antlr4::ANTLRInputStream input(*inputStream);
   TLexer lexer(&input);
   CommonTokenStream tokens(&lexer);
 
   tokens.fill();
   for (auto token : tokens.getTokens()) {
-    std::cout << token->toString() << std::endl;
+      std::cout << token->toString() << std::endl;
   }
 
   TParser parser(&tokens);
@@ -38,15 +39,22 @@ int main(int , const char **) {
 
   rcc::ASTBuilder builder;
   auto tu = std::any_cast<std::shared_ptr<ast::TranslationUnit>>(builder.visit(tree));
-  auto extDecl = tu->externalDecls[0];
+  std::cout << tree::Trees::toStringTree(tree, &parser) << std::endl;
+  for (auto child : tree->children) {
+  if (auto extDecl = dynamic_cast<TParser::ExternalDeclarationContext*>(child)) {
+      if (auto funcDef = extDecl->functionDefinition()) {
+        std::cout << "Function Definition subtree:" << std::endl;
+        std::cout << antlr4::tree::Trees::toStringTree(funcDef, &parser) << std::endl;
+      } else if (auto decl = extDecl->declaration()) {
+        std::cout << "Declaration subtree:" << std::endl;
+        std::cout << antlr4::tree::Trees::toStringTree(decl, &parser) << std::endl;
+      }
+    }
+  }
 
-  if(std::dynamic_pointer_cast<std::shared_ptr<ast::FunctionDef>>(extDecl))
-    std::cout << "funcDef";
-  else if(std::dynamic_pointer_cast<std::shared_ptr<ast::Declaration>>(extDecl))
-    std::cout << "declaration";
-  else std::cout << "no match";
-
-  std::cout << tree->toStringTree(&parser) << std::endl << std::endl;
+  if (file.is_open()) {
+      file.close();
+  }
 
   return 0;
 }

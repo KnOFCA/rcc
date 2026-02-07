@@ -334,6 +334,14 @@ struct ReturnStmt : Stmt {
  *  Expressions
  * ============================================================ */
 
+enum class opcode {
+    COMMA, ASSIGN, OROR, ANDAND, BITOR, BITXOR, BITAND,
+    EQ, NEQ, LT, GT, LE, GE,
+    ADD, SUB, MUL, DIV, MOD,
+    STAR, AMP, PLUSPLUS, MINUSMINUS,
+    NONE
+};
+
 struct Expr : ASTNode {
 };
 
@@ -346,12 +354,12 @@ struct LiteralExpr : Expr {
 };
 
 struct UnaryExpr : Expr {
-    std::string op;
+    opcode op;
     AST operand;
 };
 
 struct BinaryExpr : Expr {
-    std::string op;
+    opcode op;
     AST lhs;
     AST rhs;
 };
@@ -368,7 +376,7 @@ struct CallExpr : Expr {
 };
 
 struct PostfixExpr : Expr {
-    std::string op; // ++ or --
+    opcode op; // ++ or --
     AST expr;
 };
 

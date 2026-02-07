@@ -248,7 +248,7 @@ statement
     ;
 
 labeledStatement
-    : Identifier Colon statement          // 普通标签
+    : Identifier Colon statement
     | Case constantExpression Colon statement
     | Default Colon statement
     ;
@@ -340,6 +340,7 @@ relationalExpression
       ((Less | Greater | LessEqual | GreaterEqual) shiftExpression)*
     ;
 
+//TODO: add shiftExpression grammar
 shiftExpression
     : additiveExpression
     ;
@@ -354,6 +355,7 @@ multiplicativeExpression
       ((Star | Slash | Percent) castExpression)*
     ;
 
+//TODO: add castexpr grammar
 castExpression
     : unaryExpression
     ;

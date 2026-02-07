@@ -9,6 +9,10 @@ if(NOT UNIX)
   message(WARNING "Unsupported operating system")
 endif()
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(antlr4-demo-GENERATED_SRC
    ${PROJECT_SOURCE_DIR}/generated/ANTLR/TLexer.cpp 
    ${PROJECT_SOURCE_DIR}/generated/ANTLR/TParser.cpp
