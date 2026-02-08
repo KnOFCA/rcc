@@ -268,7 +268,7 @@ std::any ASTBuilder::visitDirectDeclarator(TParser::DirectDeclaratorContext *ctx
     if(ctx->declarator()){
         auto paren = std::make_shared<ast::DDParen>();
         auto v = visit(ctx->declarator());
-        paren->inner = std::any_cast<ast::AST>(v);
+        paren->inner = std::static_pointer_cast<ast::ASTNode>(std::any_cast<std::shared_ptr<ast::Declarator>>(v));
         return std::static_pointer_cast<ast::DirectDeclarator>(paren);
     }
 
@@ -311,7 +311,7 @@ std::any ASTBuilder::visitPointer(TParser::PointerContext *ctx) {
         std::back_inserter(ptr->qualifiers),
         [&](TParser::TypeQualifierContext *ctxx)-> std::shared_ptr<ast::TypeQualifierSpec>{
             //CHECK: any_cast
-            return std::any_cast<std::shared_ptr<ast::TypeQualifierSpec>>(visitTypeQualifier(ctxx));
+            return std::dynamic_pointer_cast<ast::TypeQualifierSpec>(std::any_cast<std::shared_ptr<ast::DeclSpecifier>>(visitTypeQualifier(ctxx)));
         });
     if(ctx->pointer()){
         auto v = visit(ctx->pointer());
@@ -439,7 +439,7 @@ std::any ASTBuilder::visitCompoundStatement(TParser::CompoundStatementContext *c
     auto compStmt = std::make_shared<ast::CompoundStmt>();
     //CHECK: move usage
     if(ctx->blockItemList())
-        compStmt->items = std::move(std::any_cast<std::vector<std::shared_ptr<ast::BlockItem>>>(visitBlockItemList(ctx->blockItemList())));
+        compStmt->items = std::any_cast<std::vector<std::shared_ptr<ast::BlockItem>>>(visitBlockItemList(ctx->blockItemList()));
     return std::static_pointer_cast<ast::Stmt>(compStmt);
 }
 
@@ -457,10 +457,16 @@ std::any ASTBuilder::visitBlockItemList(TParser::BlockItemListContext *ctx) {
 
 std::any ASTBuilder::visitBlockItem(TParser::BlockItemContext *ctx) {
     if(ctx->declaration()){
-        return std::any_cast<std::shared_ptr<ast::BlockItem>>(visit(ctx->declaration()));
+        auto v = visit(ctx->declaration());
+        auto declItem = std::make_shared<ast::DeclItem>();
+        declItem->decl = std::dynamic_pointer_cast<ast::Declaration>(std::any_cast<std::shared_ptr<ast::ExternalDecl>>(v));
+        return std::static_pointer_cast<ast::BlockItem>(declItem);
     }
     if(ctx->statement()){
-        return std::any_cast<std::shared_ptr<ast::BlockItem>>(visit(ctx->statement()));
+        auto v = visit(ctx->statement());
+        auto stmtItem = std::make_shared<ast::StmtItem>();
+        stmtItem->stmt = std::any_cast<std::shared_ptr<ast::Stmt>>(v);
+        return std::static_pointer_cast<ast::BlockItem>(stmtItem);
     }
     return nullptr;
 }
@@ -549,11 +555,11 @@ std::any ASTBuilder::visitIterationStatement(TParser::IterationStatementContext 
 std::any ASTBuilder::visitForInit(TParser::ForInitContext *ctx) {
     if(ctx->expressionStatement()){
         auto v = visit(ctx->expressionStatement());
-        return std::any_cast<ast::AST>(v);
+        return std::static_pointer_cast<ast::ASTNode>(std::any_cast<std::shared_ptr<ast::Stmt>>(v));
     }
     if(ctx->declaration()){
         auto v = visit(ctx->declaration());
-        return std::any_cast<ast::AST>(v);
+        return std::static_pointer_cast<ast::ASTNode>(std::any_cast<std::shared_ptr<ast::ExternalDecl>>(v));
     }
     return nullptr;
 }
@@ -982,6 +988,22 @@ std::any ASTBuilder::visitPostfixExpression(TParser::PostfixExpressionContext *c
                 call->callee = expr;
                 call->args = std::move(args);
                 expr = std::static_pointer_cast<ast::ASTNode>(call);
+                continue;
+            }
+            if (tt == TParser::LeftBracket) {
+                // Array subscript: look for expression then RightBracket
+                if (i + 1 < children.size()) {
+                    auto indexExpr = visit(children[i+1]);
+                    auto subscript = std::make_shared<ast::PostfixExpr>();
+                    subscript->op = ast::opcode::ARRAY;
+                    subscript->expr = std::any_cast<ast::AST>(indexExpr);
+                    expr = std::static_pointer_cast<ast::ASTNode>(subscript);
+                    // skip LeftBracket, indexExpr, RightBracket
+                    i += 3;
+                } else {
+                    // malformed but skip
+                    ++i;
+                }
                 continue;
             }
             // other terminals (RightParen etc.) -- skip

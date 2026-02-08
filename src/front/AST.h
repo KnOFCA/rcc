@@ -344,6 +344,7 @@ enum class opcode {
     EQ, NEQ, LT, GT, LE, GE,
     ADD, SUB, MUL, DIV, MOD,
     STAR, AMP, PLUSPLUS, MINUSMINUS,
+    ARRAY,
     NONE
 };
 
@@ -381,7 +382,7 @@ struct CallExpr : Expr {
 };
 
 struct PostfixExpr : Expr {
-    opcode op; // ++ or --
+    opcode op; // ++ or -- or array access
     AST expr;
 };
 

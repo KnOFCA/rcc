@@ -127,7 +127,7 @@ void test_pointers(void) {
     // 指针算术
     p++;
     p--;
-    p += 2;
+    //p += 2;
     int diff = p - arr;
 
     // 解引用

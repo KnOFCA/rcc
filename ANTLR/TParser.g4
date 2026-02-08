@@ -280,8 +280,7 @@ selectionStatement
 iterationStatement
     : While LeftParen expression RightParen statement
     | Do statement While LeftParen expression RightParen Semi
-    //TODO now: add support for declaration in for loop init
-    | For LeftParen forInit? expressionStatement? expression? RightParen statement
+    | For LeftParen forInit expressionStatement expression? RightParen statement
     ;
 
 forInit
@@ -387,6 +386,7 @@ unaryOperator
 postfixExpression
     : primaryExpression
       (   LeftParen argumentExpressionList? RightParen
+        | LeftBracket expression RightBracket
         | PlusPlus
         | MinusMinus
       )*
