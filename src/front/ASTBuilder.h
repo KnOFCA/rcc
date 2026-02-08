@@ -103,6 +103,9 @@ public:
     std::any visitPostfixExpression(TParser::PostfixExpressionContext *ctx) override;
     std::any visitPrimaryExpression(TParser::PrimaryExpressionContext *ctx) override;
     std::any visitArgumentExpressionList(TParser::ArgumentExpressionListContext *ctx) override;
+    std::any visitTypeName(TParser::TypeNameContext *ctx) override;
+    std::any visitAbstractDeclarator(TParser::AbstractDeclaratorContext *ctx) override;
+    std::any visitDirectAbstractDeclarator(TParser::DirectAbstractDeclaratorContext *ctx) override;
 
     /* ============================================================
      *  Constants

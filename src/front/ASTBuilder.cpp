@@ -766,7 +766,7 @@ std::any ASTBuilder::visitEqualityExpression(TParser::EqualityExpressionContext 
 }
 
 std::any ASTBuilder::visitRelationalExpression(TParser::RelationalExpressionContext *ctx) {
-        auto exprs = ctx->shiftExpression();
+    auto exprs = ctx->shiftExpression();
     
     if (exprs.empty()) {
         return nullptr;
@@ -812,9 +812,41 @@ std::any ASTBuilder::visitRelationalExpression(TParser::RelationalExpressionCont
     return left;
 }
 
-//TODO: add shiftexpr grammar
 std::any ASTBuilder::visitShiftExpression(TParser::ShiftExpressionContext *ctx) {
-    return visitChildren(ctx);
+    auto exprs = ctx->additiveExpression();
+    
+    if (exprs.empty()) {
+        return nullptr;
+    }
+    
+    std::vector<ast::opcode> ops;
+    for (auto child : ctx->children) {
+        if (antlr4::tree::TerminalNode* node = 
+            dynamic_cast<antlr4::tree::TerminalNode*>(child)) {
+            if (node->getSymbol()->getType() == TParser::LeftShift) {
+                ops.push_back(ast::opcode::LSHIFT);
+            }
+            else if (node->getSymbol()->getType() == TParser::RightShift) {
+                ops.push_back(ast::opcode::RSHIFT);
+            }
+        }
+    }
+    
+    auto result = visit(exprs[0]);
+    ast::AST left = std::any_cast<ast::AST>(result);
+    
+    for (size_t i = 0; i < ops.size(); ++i) {
+        auto binaryExpr = std::make_shared<ast::BinaryExpr>();
+        binaryExpr->op = ops[i];
+        binaryExpr->lhs = left;
+        
+        auto rightResult = visit(exprs[i + 1]);
+        binaryExpr->rhs = std::any_cast<ast::AST>(rightResult);
+        
+        left = std::static_pointer_cast<ast::ASTNode>(binaryExpr);
+    }
+    
+    return left;
 }
 
 std::any ASTBuilder::visitAdditiveExpression(TParser::AdditiveExpressionContext *ctx) {
@@ -903,7 +935,7 @@ std::any ASTBuilder::visitCastExpression(TParser::CastExpressionContext *ctx) {
     return visitChildren(ctx);
 }
 
-//CHECK: AI implementation
+//CHECK: AI implementation for all below functions
 std::any ASTBuilder::visitUnaryExpression(TParser::UnaryExpressionContext *ctx) {
     // ++ unaryExpression | -- unaryExpression
     if (ctx->PlusPlus()) {
@@ -1072,6 +1104,90 @@ std::any ASTBuilder::visitArgumentExpressionList(TParser::ArgumentExpressionList
         args[i] = std::any_cast<ast::AST>(v);
     }
     return args;
+}
+
+std::any ASTBuilder::visitTypeName(TParser::TypeNameContext *ctx) {
+    auto tn = std::make_shared<ast::TypeName>();
+
+    // declarationSpecifiers
+    if (ctx->declarationSpecifiers()) {
+        auto v = visit(ctx->declarationSpecifiers());
+        tn->specs = std::any_cast<std::shared_ptr<ast::DeclSpec>>(v);
+    }
+
+    // optional abstractDeclarator
+    if (ctx->abstractDeclarator()) {
+        auto v = visit(ctx->abstractDeclarator());
+        // store as generic AST (ASTNode)
+        tn->abstractDecl = std::static_pointer_cast<ast::ASTNode>(std::any_cast<std::shared_ptr<ast::AbstractDeclarator>>(v));
+    } else {
+        tn->abstractDecl = nullptr;
+    }
+
+    return tn;
+}
+
+std::any ASTBuilder::visitAbstractDeclarator(TParser::AbstractDeclaratorContext *ctx) {
+    auto ad = std::make_shared<ast::AbstractDeclarator>();
+
+    if (ctx->pointer()) {
+        auto v = visit(ctx->pointer());
+        ad->pointer = std::any_cast<std::shared_ptr<ast::Pointer>>(v);
+    } else {
+        ad->pointer = nullptr;
+    }
+
+    if (ctx->directAbstractDeclarator()) {
+        auto v = visit(ctx->directAbstractDeclarator());
+        ad->direct = std::any_cast<std::shared_ptr<ast::DirectAbstractDeclarator>>(v);
+    } else {
+        ad->direct = nullptr;
+    }
+
+    return ad;
+}
+
+std::any ASTBuilder::visitDirectAbstractDeclarator(TParser::DirectAbstractDeclaratorContext *ctx) {
+    // LeftParen abstractDeclarator RightParen
+    if (ctx->LeftParen() && ctx->abstractDeclarator()) {
+        auto p = std::make_shared<ast::DAParen>();
+        auto v = visit(ctx->abstractDeclarator());
+        p->inner = std::any_cast<std::shared_ptr<ast::AbstractDeclarator>>(v);
+        return std::static_pointer_cast<ast::DirectAbstractDeclarator>(p);
+    }
+
+    // directAbstractDeclarator LeftBracket constantExpression? RightBracket
+    if (ctx->LeftBracket()) {
+        // this rule is left-recursive; grammar ensures directAbstractDeclarator() exists
+        if (ctx->directAbstractDeclarator()) {
+            auto arr = std::make_shared<ast::DAArray>();
+            auto v = visit(ctx->directAbstractDeclarator());
+            arr->base = std::any_cast<std::shared_ptr<ast::DirectAbstractDeclarator>>(v);
+            if (ctx->constantExpression()) {
+                v = visit(ctx->constantExpression());
+                arr->size = std::any_cast<ast::AST>(v);
+            } else {
+                arr->size = nullptr;
+            }
+            return std::static_pointer_cast<ast::DirectAbstractDeclarator>(arr);
+        }
+    }
+
+    // directAbstractDeclarator LeftParen parameterTypeList? RightParen
+    if (ctx->LeftParen() || ctx->parameterTypeList()) {
+        if (ctx->directAbstractDeclarator()) {
+            auto call = std::make_shared<ast::DACall>();
+            auto v = visit(ctx->directAbstractDeclarator());
+            call->base = std::any_cast<std::shared_ptr<ast::DirectAbstractDeclarator>>(v);
+            if (ctx->parameterTypeList()) {
+                v = visit(ctx->parameterTypeList());
+                call->params = std::any_cast<std::vector<std::shared_ptr<ast::ParameterDecl>>>(v);
+            }
+            return std::static_pointer_cast<ast::DirectAbstractDeclarator>(call);
+        }
+    }
+
+    return nullptr;
 }
 
 /* ============================================================ */

@@ -305,8 +305,7 @@ expression
 
 assignmentExpression
     : conditionalExpression
-    // TODO now: add support for all assignment operators
-    | unaryExpression (Assign | PlusAssign | MinusAssign | MultAssign | DivAssign | ModAssign
+    | unaryExpression (Assign | PlusAssign | MinusAssign | MultAssign | DivAssign | ModAssign | 
                        AndAssign | OrAssign | XorAssign | LSAssign | RSAssign) assignmentExpression
     ;
 
@@ -349,9 +348,8 @@ relationalExpression
       ((Less | Greater | LessEqual | GreaterEqual) shiftExpression)*
     ;
 
-//TODO: add shiftExpression grammar
 shiftExpression
-    : additiveExpression
+    : additiveExpression ((LeftShift | RightShift) additiveExpression)*
     ;
 
 additiveExpression
@@ -367,6 +365,7 @@ multiplicativeExpression
 //TODO: add castexpr grammar
 castExpression
     : unaryExpression
+    | LeftParen typeName RightParen castExpression
     ;
 
 unaryExpression
@@ -403,6 +402,21 @@ primaryExpression
 
 argumentExpressionList
     : assignmentExpression (Comma assignmentExpression)*
+    ;
+
+typeName
+    : declarationSpecifiers abstractDeclarator?
+    ;
+
+abstractDeclarator
+    : pointer
+    | pointer? directAbstractDeclarator
+    ;
+
+directAbstractDeclarator
+    : LeftParen abstractDeclarator RightParen
+    | directAbstractDeclarator LeftBracket constantExpression? RightBracket
+    | directAbstractDeclarator LeftParen parameterTypeList? RightParen
     ;
 
 /* ============================================================

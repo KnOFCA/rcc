@@ -206,6 +206,37 @@ struct Declarator : ASTNode {
 };
 
 /* ============================================================
+ *  Abstract declarators / type names
+ * ============================================================ */
+
+struct AbstractDeclarator : ASTNode {
+    std::shared_ptr<Pointer> pointer;
+    std::shared_ptr<struct DirectAbstractDeclarator> direct;
+};
+
+struct DirectAbstractDeclarator : ASTNode {
+};
+
+struct DAParen : DirectAbstractDeclarator {
+    std::shared_ptr<AbstractDeclarator> inner;
+};
+
+struct DAArray : DirectAbstractDeclarator {
+    std::shared_ptr<DirectAbstractDeclarator> base;
+    AST size; // may be null
+};
+
+struct DACall : DirectAbstractDeclarator {
+    std::shared_ptr<DirectAbstractDeclarator> base;
+    std::vector<std::shared_ptr<ParameterDecl>> params;
+};
+
+struct TypeName : ASTNode {
+    std::shared_ptr<DeclSpec> specs;
+    AST abstractDecl; // optional AbstractDeclarator
+};
+
+/* ============================================================
  *  Initializers
  * ============================================================ */
 
@@ -343,7 +374,7 @@ enum class opcode {
     COMMA, 
     ASSIGN, PLUSASSIGN, MINUSASSIGN, MULASSIGN, DIVASSIGN, MODASSIGN,
     ANDASSIGN, ORASSIGN, XORASSIGN, LSASSIGN, RSASSIGN,
-    OROR, ANDAND, BITOR, BITXOR, BITAND,
+    OROR, ANDAND, BITOR, BITXOR, BITAND, LSHIFT, RSHIFT,
     EQ, NEQ, LT, GT, LE, GE,
     ADD, SUB, MUL, DIV, MOD,
     STAR, AMP, PLUSPLUS, MINUSMINUS,
