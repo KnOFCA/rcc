@@ -649,17 +649,39 @@ std::any ASTBuilder::visitExpression(TParser::ExpressionContext *ctx) {
 }
 
 std::any ASTBuilder::visitAssignmentExpression(TParser::AssignmentExpressionContext *ctx) {
-    if(ctx->Assign()){
-        auto assignExpr = std::make_shared<ast::BinaryExpr>();
-        assignExpr->op = ast::opcode::ASSIGN;
-        auto v = visit(ctx->unaryExpression());
-        assignExpr->lhs = std::any_cast<ast::AST>(v);
-        v = visit(ctx->assignmentExpression());
-        assignExpr->rhs = std::any_cast<ast::AST>(v);
-        return std::static_pointer_cast<ast::ASTNode>(assignExpr);
-    } else {
-        return visitChildren(ctx);
+    if(ctx->conditionalExpression()){
+        return visit(ctx->conditionalExpression());
     }
+
+    auto assignExpr = std::make_shared<ast::BinaryExpr>();
+    if(ctx->Assign())
+        assignExpr->op = ast::opcode::ASSIGN;
+    else if(ctx->PlusAssign())
+        assignExpr->op = ast::opcode::PLUSASSIGN;
+    else if(ctx->MinusAssign())
+        assignExpr->op = ast::opcode::MINUSASSIGN;
+    else if(ctx->MultAssign())
+        assignExpr->op = ast::opcode::MULASSIGN;
+    else if(ctx->DivAssign())
+        assignExpr->op = ast::opcode::DIVASSIGN;
+    else if(ctx->ModAssign())
+        assignExpr->op = ast::opcode::MODASSIGN;
+    else if(ctx->LSAssign())
+        assignExpr->op = ast::opcode::LSASSIGN;
+    else if(ctx->RSAssign())
+        assignExpr->op = ast::opcode::RSASSIGN;
+    else if(ctx->AndAssign())
+        assignExpr->op = ast::opcode::ANDASSIGN;
+    else if(ctx->XorAssign())
+        assignExpr->op = ast::opcode::XORASSIGN;
+    else if(ctx->OrAssign())
+        assignExpr->op = ast::opcode::ORASSIGN;
+
+    auto v = visit(ctx->unaryExpression());
+    assignExpr->lhs = std::any_cast<ast::AST>(v);
+    v = visit(ctx->assignmentExpression());
+    assignExpr->rhs = std::any_cast<ast::AST>(v);
+    return std::static_pointer_cast<ast::ASTNode>(assignExpr);
 }
 
 std::any ASTBuilder::visitConditionalExpression(TParser::ConditionalExpressionContext *ctx) {

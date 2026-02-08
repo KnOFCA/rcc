@@ -305,7 +305,9 @@ expression
 
 assignmentExpression
     : conditionalExpression
-    | unaryExpression Assign assignmentExpression
+    // TODO now: add support for all assignment operators
+    | unaryExpression (Assign | PlusAssign | MinusAssign | MultAssign | DivAssign | ModAssign
+                       AndAssign | OrAssign | XorAssign | LSAssign | RSAssign) assignmentExpression
     ;
 
 conditionalExpression

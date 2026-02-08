@@ -19,6 +19,8 @@ void test_expressions(void) {
     c = a / b;
     c = a % b;
 
+    c = a = b;
+
     // 关系与逻辑
     int cond = (a > b) && (f != 0) || (ch == 'A');
 

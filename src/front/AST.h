@@ -340,7 +340,10 @@ struct ReturnStmt : Stmt {
  * ============================================================ */
 
 enum class opcode {
-    COMMA, ASSIGN, OROR, ANDAND, BITOR, BITXOR, BITAND,
+    COMMA, 
+    ASSIGN, PLUSASSIGN, MINUSASSIGN, MULASSIGN, DIVASSIGN, MODASSIGN,
+    ANDASSIGN, ORASSIGN, XORASSIGN, LSASSIGN, RSASSIGN,
+    OROR, ANDAND, BITOR, BITXOR, BITAND,
     EQ, NEQ, LT, GT, LE, GE,
     ADD, SUB, MUL, DIV, MOD,
     STAR, AMP, PLUSPLUS, MINUSMINUS,

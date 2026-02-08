@@ -46,7 +46,7 @@ find_package(Java COMPONENTS Runtime REQUIRED)
 # 假设ANTLR_JAR_LOCATION已在环境中设置，否则提供默认路径
 if(NOT DEFINED ANTLR_JAR_LOCATION)
     message(WARNING "ANTLR_JAR_LOCATION is not defined. Using default path.")
-    set(ANTLR_JAR_LOCATION "/usr/local/lib/antlr-4.13.1-complete.jar")
+    set(ANTLR_JAR_LOCATION "/usr/local/lib/antlr-4.13.2-complete.jar")
 endif()
 
 # 自定义命令来生成ANTLR代码
