@@ -190,6 +190,11 @@ struct ParameterDecl : ASTNode {
     AST declarator;
 };
 
+struct DDArray : DirectDeclarator {
+    std::shared_ptr<DirectDeclarator> base;
+    AST size; // may be null for unsized array
+};
+
 struct DDCall : DirectDeclarator {
     AST base; // DirectDeclarator
     std::vector<std::shared_ptr<ParameterDecl>> params;
@@ -308,8 +313,8 @@ struct DoWhileStmt : Stmt {
 };
 
 struct ForStmt : Stmt {
-    std::shared_ptr<Stmt> init;  // expressionStatement
-    std::shared_ptr<Stmt> cond;  // expressionStatement
+    AST init;                    // forInit: expressionStatement or declaration
+    std::shared_ptr<Stmt> cond;  // expressionStatement?
     AST iter;                    // expression?
     std::shared_ptr<Stmt> body;
 };

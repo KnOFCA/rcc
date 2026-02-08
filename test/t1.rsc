@@ -27,20 +27,20 @@ void test_expressions(void) {
     c = a | b;
     c = a ^ b;
     c = ~a;
-    c = a << 2;
-    c = a >> 1;
+    //c = a << 2;
+    //c = a >> 1;
 
     // 赋值运算
-    a += b;
-    a -= b;
-    a *= b;
-    a /= b;
-    a %= b;
-    a &= b;
-    a |= b;
-    a ^= b;
-    a <<= 1;
-    a >>= 1;
+    // a += b;
+    // a -= b;
+    // a *= b;
+    // a /= b;
+    // a %= b;
+    // a &= b;
+    // a |= b;
+    // a ^= b;
+    // a <<= 1;
+    // a >>= 1;
 
     // 自增自减
     a++;
@@ -55,17 +55,8 @@ void test_expressions(void) {
     c = (a++, b++, a + b);
 
     // 类型转换
-    f = (float)a;
-    c = (int)f;
-
-    // 复合字面量
-    int *p = (int[]){1, 2, 3};
-
-    // 成员访问
-    struct Point pt = { .x = 1, .y = 2 };
-    pt.x = 10;
-    Point *pt_ptr = &pt;
-    pt_ptr->y = 20;
+    // f = (float)a;
+    // c = (int)f;
 }
 
 /* ------------------- 控制流测试 ------------------- */

@@ -272,7 +272,20 @@ std::any ASTBuilder::visitDirectDeclarator(TParser::DirectDeclaratorContext *ctx
         return std::static_pointer_cast<ast::DirectDeclarator>(paren);
     }
 
-    if(ctx->parameterTypeList() || ctx->directDeclarator()){
+    if(ctx->LeftBracket()){
+        auto arr = std::make_shared<ast::DDArray>();
+        auto v = visit(ctx->directDeclarator());
+        arr->base = std::any_cast<std::shared_ptr<ast::DirectDeclarator>>(v);
+        if(ctx->constantExpression()){
+            v = visit(ctx->constantExpression());
+            arr->size = std::any_cast<ast::AST>(v);
+        } else {
+            arr->size = nullptr; // unsized array
+        }
+        return std::static_pointer_cast<ast::DirectDeclarator>(arr);
+    }
+
+    if(ctx->parameterTypeList() || ctx->LeftParen()){
         auto call =  std::make_shared<ast::DDCall>();
         {
             auto v = visit(ctx->directDeclarator());
@@ -333,6 +346,7 @@ std::any ASTBuilder::visitParameterDeclaration(TParser::ParameterDeclarationCont
         paraDecl->specs = std::any_cast<std::shared_ptr<ast::DeclSpec>>(v);
     }
 
+    if(ctx->declarator())
     {
         auto v = visit(ctx->declarator());
         paraDecl->declarator = std::static_pointer_cast<ast::ASTNode>(std::any_cast<std::shared_ptr<ast::Declarator>>(v));
@@ -507,14 +521,14 @@ std::any ASTBuilder::visitIterationStatement(TParser::IterationStatementContext 
     }
     if(ctx->For()){
         auto forStmt = std::make_shared<ast::ForStmt>();
-        if(ctx->expressionStatement(0)){
-            auto v = visit(ctx->expressionStatement(0));
-            forStmt->init = std::any_cast<std::shared_ptr<ast::Stmt>>(v);
+        if(ctx->forInit()){
+            auto v = visit(ctx->forInit());
+            forStmt->init = std::any_cast<ast::AST>(v);
         } else {
             forStmt->init = nullptr;
         }
-        if(ctx->expressionStatement(1)){
-            auto v = visit(ctx->expressionStatement(1));
+        if(ctx->expressionStatement()){
+            auto v = visit(ctx->expressionStatement());
             forStmt->cond = std::any_cast<std::shared_ptr<ast::Stmt>>(v);
         } else {
             forStmt->cond = nullptr;
@@ -528,6 +542,18 @@ std::any ASTBuilder::visitIterationStatement(TParser::IterationStatementContext 
         auto v = visit(ctx->statement());
         forStmt->body = std::any_cast<std::shared_ptr<ast::Stmt>>(v);
         return std::static_pointer_cast<ast::Stmt>(forStmt);
+    }
+    return nullptr;
+}
+
+std::any ASTBuilder::visitForInit(TParser::ForInitContext *ctx) {
+    if(ctx->expressionStatement()){
+        auto v = visit(ctx->expressionStatement());
+        return std::any_cast<ast::AST>(v);
+    }
+    if(ctx->declaration()){
+        auto v = visit(ctx->declaration());
+        return std::any_cast<ast::AST>(v);
     }
     return nullptr;
 }

@@ -197,11 +197,13 @@ initDeclarator
 
 declarator
     : pointer? directDeclarator
+    | pointer
     ;
 
 directDeclarator
     : Identifier
     | LeftParen declarator RightParen
+    | directDeclarator LeftBracket constantExpression? RightBracket
     | directDeclarator LeftParen parameterTypeList? RightParen
     ;
 
@@ -218,7 +220,7 @@ parameterList
     ;
 
 parameterDeclaration
-    : declarationSpecifiers declarator
+    : declarationSpecifiers declarator?
     ;
 
 /* ============================================================
@@ -278,7 +280,13 @@ selectionStatement
 iterationStatement
     : While LeftParen expression RightParen statement
     | Do statement While LeftParen expression RightParen Semi
-    | For LeftParen expressionStatement expressionStatement expression? RightParen statement
+    //TODO now: add support for declaration in for loop init
+    | For LeftParen forInit? expressionStatement? expression? RightParen statement
+    ;
+
+forInit
+    : expressionStatement
+    | declaration
     ;
 
 jumpStatement

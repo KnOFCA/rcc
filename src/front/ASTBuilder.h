@@ -76,6 +76,7 @@ public:
     std::any visitExpressionStatement(TParser::ExpressionStatementContext *ctx) override;
     std::any visitSelectionStatement(TParser::SelectionStatementContext *ctx) override;
     std::any visitIterationStatement(TParser::IterationStatementContext *ctx) override;
+    std::any visitForInit(TParser::ForInitContext *ctx) override;
     std::any visitJumpStatement(TParser::JumpStatementContext *ctx) override;
 
     /* ============================================================
