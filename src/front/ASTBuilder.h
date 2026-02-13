@@ -4,7 +4,7 @@
 #include "AST.h"
 #include "./ANTLR/TParserBaseVisitor.h"
 
-namespace rcc {
+namespace rcc::front {
 
 using AST = ast::AST;
 using TParserBaseVisitor = antlrcpptest::TParserBaseVisitor;
@@ -113,4 +113,4 @@ public:
     std::any visitConstant(TParser::ConstantContext *ctx) override;
 };
 
-} // namespace rcc
+} // namespace rcc::front

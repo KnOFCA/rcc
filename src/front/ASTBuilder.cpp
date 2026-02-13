@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <concepts>
 
-using namespace rcc;
+using namespace rcc::front;
 
 std::any ASTBuilder::visitTranslationUnit(TParser::TranslationUnitContext *ctx) {
     auto tu = std::make_shared<ast::TranslationUnit>();
