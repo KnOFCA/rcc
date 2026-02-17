@@ -3,3 +3,4 @@ build/
 generated/
 ANTLR/.antlr
 .cache
+test/

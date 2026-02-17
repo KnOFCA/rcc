@@ -427,6 +427,7 @@ struct CallExpr : Expr {
 struct PostfixExpr : Expr {
     opcode op; // ++ or -- or array access
     AST expr;
+    AST array; // expect IdExpr.
 };
 
 struct CastExpr : Expr {

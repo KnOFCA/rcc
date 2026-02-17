@@ -1061,6 +1061,7 @@ std::any ASTBuilder::visitPostfixExpression(TParser::PostfixExpressionContext *c
                     auto subscript = std::make_shared<ast::PostfixExpr>();
                     subscript->op = ast::opcode::ARRAY;
                     subscript->expr = std::any_cast<ast::AST>(indexExpr);
+                    subscript->array = expr;
                     expr = std::static_pointer_cast<ast::ASTNode>(subscript);
                     // skip LeftBracket, indexExpr, RightBracket
                     i += 3;

@@ -114,6 +114,7 @@ class ASTVisitor {
   void visitImpl(const std::shared_ptr<ast::CallExpr> &call) { if (!call) return; if (call->callee) visit(call->callee); for (auto &a : call->args) if (a) visit(a); }
   void visitImpl(const std::shared_ptr<ast::PostfixExpr> &post) { 
     if (!post) return; 
+    if (post->op == ast::opcode::ARRAY) visit(std::dynamic_pointer_cast<ast::Expr>(post->array));
     if (auto expr = std::dynamic_pointer_cast<ast::Expr>(post->expr)) visit(expr); 
   }
   void visitImpl(const std::shared_ptr<ast::CastExpr> &cast) {
