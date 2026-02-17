@@ -1,4 +1,5 @@
 #include "koopa.h"
+#include "IRBuilder.h"
 
 using namespace rcc::ir;
 using namespace rcc::front;

@@ -8,6 +8,7 @@
 #include "./ANTLR/TParser.h"
 #include "./front/ASTBuilder.h"
 #include "./front/AST.h"
+#include "./front/ASTPrinter.h"
 
 using namespace antlrcpptest;
 using namespace antlr4;
@@ -37,9 +38,9 @@ int main(int argc, const char **argv) {
   TParser parser(&tokens);
   tree::ParseTree* tree = parser.translationUnit();
 
-  rcc::ASTBuilder builder;
+  rcc::front::ASTBuilder builder;
   auto tu = std::any_cast<std::shared_ptr<ast::TranslationUnit>>(builder.visit(tree));
-  std::cout << tree::Trees::toStringTree(tree, &parser) << std::endl;
+  // std::cout << tree::Trees::toStringTree(tree, &parser) << std::endl;
   for (auto child : tree->children) {
   if (auto extDecl = dynamic_cast<TParser::ExternalDeclarationContext*>(child)) {
       if (auto funcDef = extDecl->functionDefinition()) {
@@ -51,6 +52,9 @@ int main(int argc, const char **argv) {
       }
     }
   }
+
+  rcc::front::ASTPrinter printer;
+  printer.visit(tu);
 
   if (file.is_open()) {
       file.close();

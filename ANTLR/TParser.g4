@@ -387,7 +387,7 @@ unaryOperator
 postfixExpression
     : primaryExpression
       (   LeftParen argumentExpressionList? RightParen
-        | LeftBracket expression RightBracket
+        | LeftBracket constantExpression RightBracket
         | PlusPlus
         | MinusMinus
       )*

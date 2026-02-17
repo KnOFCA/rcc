@@ -82,11 +82,17 @@ file(GLOB FRONT_SRCS CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/src/front/*.cxx"
 )
 
+file(GLOB IR_SRCS CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/ir/*.cpp"
+    "${PROJECT_SOURCE_DIR}/src/ir/*.cxx"
+)
+
 # 组合所有源文件
 set(ANTLR4_DEMO_SRC
     ${MAIN_SRC}
     ${ANTLR_GENERATED_SRC}
     ${FRONT_SRCS}
+    ${IR_SRCS}
 )
 
 # 添加可执行文件

@@ -1,4 +1,2 @@
-int main() {
-    f = (float)a;
-    c = (int)f;
-}
+int a[10];
+float b = (double)a[1];

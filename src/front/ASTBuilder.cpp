@@ -695,9 +695,11 @@ std::any ASTBuilder::visitConditionalExpression(TParser::ConditionalExpressionCo
         condExpr->thenExpr = std::any_cast<ast::AST>(v);
         v = visit(ctx->conditionalExpression());
         condExpr->elseExpr = std::any_cast<ast::AST>(v);
+        return std::static_pointer_cast<ast::ASTNode>(condExpr);
     } else {
         condExpr->thenExpr = condExpr->cond; //CHECK: fill with cond or not
         condExpr->elseExpr = nullptr;
+        return std::any_cast<ast::AST>(v);
     }
 
     return std::static_pointer_cast<ast::ASTNode>(condExpr);
@@ -932,7 +934,14 @@ std::any ASTBuilder::visitMultiplicativeExpression(TParser::MultiplicativeExpres
 
 //TODO: add castexpr grammar
 std::any ASTBuilder::visitCastExpression(TParser::CastExpressionContext *ctx) {
-    return visitChildren(ctx);
+    if(ctx->typeName()) {
+        auto castExpr = std::make_shared<ast::CastExpr>();
+        auto typeName = visit(ctx->typeName());
+        castExpr->type = std::any_cast<std::shared_ptr<ast::TypeName>>(typeName);
+        castExpr->expr = std::any_cast<ast::AST>(visit(ctx->castExpression()));
+        return std::static_pointer_cast<ast::ASTNode>(castExpr);
+    }
+    else return visit(ctx->unaryExpression());
 }
 
 //CHECK: AI implementation for all below functions
@@ -1044,6 +1053,7 @@ std::any ASTBuilder::visitPostfixExpression(TParser::PostfixExpressionContext *c
                 expr = std::static_pointer_cast<ast::ASTNode>(call);
                 continue;
             }
+            // BUG: can not record primary expression
             if (tt == TParser::LeftBracket) {
                 // Array subscript: look for expression then RightBracket
                 if (i + 1 < children.size()) {
@@ -1089,6 +1099,7 @@ std::any ASTBuilder::visitPrimaryExpression(TParser::PrimaryExpressionContext *c
     if (ctx->StringLiteral()) {
         auto lit = std::make_shared<ast::LiteralExpr>();
         lit->value = ctx->StringLiteral()->getText();
+        lit->type = ast::LiteralExpr::STRING;
         return std::static_pointer_cast<ast::ASTNode>(lit);
     }
     if (ctx->expression()) {
@@ -1198,16 +1209,19 @@ std::any ASTBuilder::visitConstant(TParser::ConstantContext *ctx) {
     if (ctx->IntegerConstant()) {
         auto lit = std::make_shared<ast::LiteralExpr>();
         lit->value = ctx->IntegerConstant()->getText();
+        lit->type = ast::LiteralExpr::INTEGER;
         return std::static_pointer_cast<ast::ASTNode>(lit);
     }
     if (ctx->FloatingConstant()) {
         auto lit = std::make_shared<ast::LiteralExpr>();
         lit->value = ctx->FloatingConstant()->getText();
+        lit->type = ast::LiteralExpr::FLOAT;
         return std::static_pointer_cast<ast::ASTNode>(lit);
     }
     if (ctx->CharacterConstant()) {
         auto lit = std::make_shared<ast::LiteralExpr>();
         lit->value = ctx->CharacterConstant()->getText();
+        lit->type = ast::LiteralExpr::CHAR;
         return std::static_pointer_cast<ast::ASTNode>(lit);
     }
 
