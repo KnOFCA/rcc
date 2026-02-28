@@ -11,7 +11,7 @@ namespace rcc::front {
 
 class ASTPrinter : public ASTVisitor<ASTPrinter> {
   public:
-    using ASTVisitor<ASTPrinter>::visitImpl;
+    //using ASTVisitor<ASTPrinter>::visitImpl;
     ///
     /// visit method.
     ///
