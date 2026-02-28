@@ -1,3 +1,2 @@
-int main() {
-    return 10;
-}
+int a;
+int b = ~a;

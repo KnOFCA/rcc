@@ -190,8 +190,6 @@ public:
     // ========================================================================
     bool WalkUpFromDeclaration(const std::shared_ptr<ast::Declaration>& decl) {
         if (!derived().VisitDeclaration(decl)) return false;
-        // 可选：调用基类 Visit
-        // if (!derived().VisitExternalDecl(decl)) return false;
         return true;
     }
 
@@ -206,6 +204,7 @@ public:
 
     bool VisitDeclaration(const std::shared_ptr<ast::Declaration>& decl) {
         if (!decl) return true;
+        std::cout << "Declaration (initDeclarators: " << decl->initDeclarators.size() << ")" << std::endl;
         return derived().TraverseDeclaration(decl);
     }
 
@@ -227,6 +226,7 @@ public:
 
     bool VisitFunctionDef(const std::shared_ptr<ast::FunctionDef>& fdef) {
         if (!fdef) return true;
+        std::cout << "FunctionDef" << std::endl;
         return derived().TraverseFunctionDef(fdef);
     }
 
@@ -291,6 +291,7 @@ public:
 
     bool VisitCompoundStmt(const std::shared_ptr<ast::CompoundStmt>& comp) {
         if (!comp) return true;
+        std::cout << "CompoundStmt (items: " << comp->items.size() << ")" << std::endl;
         return derived().TraverseCompoundStmt(comp);
     }
 
@@ -400,6 +401,7 @@ public:
 
     bool VisitIfStmt(const std::shared_ptr<ast::IfStmt>& ifs) {
         if (!ifs) return true;
+        std::cout << "IfStmt (hasElse: " << (ifs->elseStmt ? "true" : "false") << ")" << std::endl;
         return derived().TraverseIfStmt(ifs);
     }
 
@@ -420,6 +422,7 @@ public:
 
     bool VisitSwitchStmt(const std::shared_ptr<ast::SwitchStmt>& ss) {
         if (!ss) return true;
+        std::cout << "SwitchStmt" << std::endl;
         return derived().TraverseSwitchStmt(ss);
     }
 
@@ -440,6 +443,7 @@ public:
 
     bool VisitWhileStmt(const std::shared_ptr<ast::WhileStmt>& ws) {
         if (!ws) return true;
+        std::cout << "WhileStmt" << std::endl;
         return derived().TraverseWhileStmt(ws);
     }
 
@@ -460,6 +464,7 @@ public:
 
     bool VisitDoWhileStmt(const std::shared_ptr<ast::DoWhileStmt>& dws) {
         if (!dws) return true;
+        std::cout << "DoWhileStmt" << std::endl;
         return derived().TraverseDoWhileStmt(dws);
     }
 
@@ -482,6 +487,7 @@ public:
 
     bool VisitForStmt(const std::shared_ptr<ast::ForStmt>& fs) {
         if (!fs) return true;
+        std::cout << "ForStmt" << std::endl;
         return derived().TraverseForStmt(fs);
     }
 
@@ -495,7 +501,7 @@ public:
 
     bool VisitGotoStmt(const std::shared_ptr<ast::GotoStmt>& gs) {
         if (!gs) return true;
-        std::cout << "Goto: " << gs->label << std::endl;
+        std::cout << "GotoStmt: " << gs->label << std::endl;
         return true;
     }
 
@@ -505,8 +511,8 @@ public:
     }
 
     bool VisitContinueStmt(const std::shared_ptr<ast::ContinueStmt>& cs) {
-        (void)cs;
-        std::cout << "Continue" << std::endl;
+        if (!cs) return true;
+        std::cout << "ContinueStmt" << std::endl;
         return true;
     }
 
@@ -516,8 +522,8 @@ public:
     }
 
     bool VisitBreakStmt(const std::shared_ptr<ast::BreakStmt>& bs) {
-        (void)bs;
-        std::cout << "Break" << std::endl;
+        if (!bs) return true;
+        std::cout << "BreakStmt" << std::endl;
         return true;
     }
 
@@ -534,6 +540,7 @@ public:
 
     bool VisitReturnStmt(const std::shared_ptr<ast::ReturnStmt>& rs) {
         if (!rs) return true;
+        std::cout << "ReturnStmt (hasValue: " << (rs->expr ? "true" : "false") << ")" << std::endl;
         return derived().TraverseReturnStmt(rs);
     }
 
@@ -571,8 +578,6 @@ public:
     // ------------------------------------------------------------------------
     bool WalkUpFromIdExpr(const std::shared_ptr<ast::IdExpr>& id) {
         if (!derived().VisitIdExpr(id)) return false;
-        // 可选：调用基类
-        // if (!derived().VisitExpr(id)) return false;
         return true;
     }
 
@@ -592,15 +597,8 @@ public:
 
     bool VisitLiteralExpr(const std::shared_ptr<ast::LiteralExpr>& lit) {
         if (!lit) return true;
-        std::string t;
-        switch (lit->type) {
-            case ast::LiteralExpr::INTEGER: t = "INTEGER"; break;
-            case ast::LiteralExpr::FLOAT:   t = "FLOAT"; break;
-            case ast::LiteralExpr::CHAR:    t = "CHAR"; break;
-            case ast::LiteralExpr::STRING:  t = "STRING"; break;
-            default: t = "UNKNOWN"; break;
-        }
-        std::cout << "Literal(" << t << "): " << lit->value << std::endl;
+        static const char* typeNames[] = {"INTEGER", "FLOAT", "CHAR", "STRING"};
+        std::cout << "LiteralExpr [" << typeNames[static_cast<int>(lit->type)] << "]: " << lit->value << std::endl;
         return true;
     }
 
@@ -620,6 +618,15 @@ public:
 
     bool VisitUnaryExpr(const std::shared_ptr<ast::UnaryExpr>& un) {
         if (!un) return true;
+        static const char* opNames[] = {
+            "COMMA", "ASSIGN", "PLUSASSIGN", "MINUSASSIGN", "MULASSIGN", "DIVASSIGN", "MODASSIGN",
+            "ANDASSIGN", "ORASSIGN", "XORASSIGN", "LSASSIGN", "RSASSIGN",
+            "OROR", "ANDAND", "BITOR", "BITXOR", "BITAND", "LSHIFT", "RSHIFT",
+            "EQ", "NEQ", "LT", "GT", "LE", "GE",
+            "ADD", "SUB", "MUL", "DIV", "MOD",
+            "STAR", "AMP", "PLUSPLUS", "MINUSMINUS", "ARRAY", "NONE"
+        };
+        std::cout << "UnaryExpr [" << opNames[static_cast<int>(un->op)] << "]" << std::endl;
         return derived().TraverseUnaryExpr(un);
     }
 
@@ -640,6 +647,15 @@ public:
 
     bool VisitBinaryExpr(const std::shared_ptr<ast::BinaryExpr>& bin) {
         if (!bin) return true;
+        static const char* opNames[] = {
+            "COMMA", "ASSIGN", "PLUSASSIGN", "MINUSASSIGN", "MULASSIGN", "DIVASSIGN", "MODASSIGN",
+            "ANDASSIGN", "ORASSIGN", "XORASSIGN", "LSASSIGN", "RSASSIGN",
+            "OROR", "ANDAND", "BITOR", "BITXOR", "BITAND", "LSHIFT", "RSHIFT",
+            "EQ", "NEQ", "LT", "GT", "LE", "GE",
+            "ADD", "SUB", "MUL", "DIV", "MOD",
+            "STAR", "AMP", "PLUSPLUS", "MINUSMINUS", "ARRAY", "NONE"
+        };
+        std::cout << "BinaryExpr [" << opNames[static_cast<int>(bin->op)] << "]" << std::endl;
         return derived().TraverseBinaryExpr(bin);
     }
 
@@ -661,6 +677,7 @@ public:
 
     bool VisitConditionalExpr(const std::shared_ptr<ast::ConditionalExpr>& ce) {
         if (!ce) return true;
+        std::cout << "ConditionalExpr (?:)" << std::endl;
         return derived().TraverseConditionalExpr(ce);
     }
 
@@ -683,6 +700,7 @@ public:
 
     bool VisitCallExpr(const std::shared_ptr<ast::CallExpr>& call) {
         if (!call) return true;
+        std::cout << "CallExpr (args: " << call->args.size() << ")" << std::endl;
         return derived().TraverseCallExpr(call);
     }
 
@@ -704,6 +722,15 @@ public:
 
     bool VisitPostfixExpr(const std::shared_ptr<ast::PostfixExpr>& post) {
         if (!post) return true;
+        static const char* opNames[] = {
+            "COMMA", "ASSIGN", "PLUSASSIGN", "MINUSASSIGN", "MULASSIGN", "DIVASSIGN", "MODASSIGN",
+            "ANDASSIGN", "ORASSIGN", "XORASSIGN", "LSASSIGN", "RSASSIGN",
+            "OROR", "ANDAND", "BITOR", "BITXOR", "BITAND", "LSHIFT", "RSHIFT",
+            "EQ", "NEQ", "LT", "GT", "LE", "GE",
+            "ADD", "SUB", "MUL", "DIV", "MOD",
+            "STAR", "AMP", "PLUSPLUS", "MINUSMINUS", "ARRAY", "NONE"
+        };
+        std::cout << "PostfixExpr [" << opNames[static_cast<int>(post->op)] << "]" << std::endl;
         return derived().TraversePostfixExpr(post);
     }
 
@@ -738,12 +765,12 @@ public:
             return derived().WalkUpFromTypeQualifierSpec(tq);
         if (auto ts = std::dynamic_pointer_cast<ast::TypeSpecifier>(ds))
             return derived().WalkUpFromTypeSpecifier(ts);
-        
         return derived().VisitDeclSpecifier(ds);
     }
 
     bool VisitDeclSpecifier(const std::shared_ptr<ast::DeclSpecifier>& ds) {
-        (void)ds;
+        if (!ds) return true;
+        std::cout << "DeclSpecifier" << std::endl;
         return true;
     }
 
@@ -757,9 +784,10 @@ public:
 
     bool VisitStorageClassSpec(const std::shared_ptr<ast::StorageClassSpec>& sc) {
         if (!sc) return true;
-        const char* names[] = {"NONE", "auto", "register", "static", "extern", "typedef"};
+        static const char* names[] = {"NONE", "auto", "register", "static", "extern", "typedef"};
         int idx = static_cast<int>(sc->storageClass);
-        std::cout << "StorageClass: " << names[idx] << std::endl;
+        if (idx >= 0 && idx <= 5)
+            std::cout << "StorageClassSpec: " << names[idx] << std::endl;
         return true;
     }
 
@@ -773,9 +801,10 @@ public:
 
     bool VisitTypeQualifierSpec(const std::shared_ptr<ast::TypeQualifierSpec>& tq) {
         if (!tq) return true;
-        const char* names[] = {"NONE", "const", "volatile", "restrict", "atomic"};
+        static const char* names[] = {"const", "volatile", "restrict", "atomic", "NONE"};
         int idx = static_cast<int>(tq->qualifier);
-        std::cout << "TypeQualifier: " << names[idx] << std::endl;
+        if (idx >= 0 && idx <= 4)
+            std::cout << "TypeQualifierSpec: " << names[idx] << std::endl;
         return true;
     }
 
@@ -807,10 +836,10 @@ public:
 
     bool VisitBuiltinTypeSpec(const std::shared_ptr<ast::BuiltinTypeSpec>& bts) {
         if (!bts) return true;
-        static const char* names[] = {"void", "char", "short", "int", "long",
-                               "float", "double", "signed", "unsigned", "bool", "NONE"};
+        static const char* names[] = {"void", "char", "short", "int", "long", "float", "double", "signed", "unsigned", "bool", "NONE"};
         int idx = static_cast<int>(bts->builtin);
-        std::cout << "BuiltinType: " << names[idx] << std::endl;
+        if (idx >= 0 && idx <= 10)
+            std::cout << "BuiltinTypeSpec: " << names[idx] << std::endl;
         return true;
     }
 
@@ -908,6 +937,7 @@ public:
 
     bool VisitDeclarator(const std::shared_ptr<ast::Declarator>& decl) {
         if (!decl) return true;
+        std::cout << "Declarator (hasPointer: " << (decl->pointer ? "true" : "false") << ")" << std::endl;
         return derived().TraverseDeclarator(decl);
     }
 
@@ -929,6 +959,8 @@ public:
 
     bool VisitPointer(const std::shared_ptr<ast::Pointer>& ptr) {
         if (!ptr) return true;
+        std::cout << "Pointer (qualifiers: " << ptr->qualifiers.size() 
+                  << ", hasMore: " << (ptr->next ? "true" : "false") << ")" << std::endl;
         return derived().TraversePointer(ptr);
     }
 
@@ -994,6 +1026,7 @@ public:
 
     bool VisitDDArray(const std::shared_ptr<ast::DDArray>& da) {
         if (!da) return true;
+        std::cout << "DDArray (hasSize: " << (da->size ? "true" : "false") << ")" << std::endl;
         return derived().TraverseDDArray(da);
     }
 
@@ -1012,6 +1045,7 @@ public:
 
     bool VisitDDCall(const std::shared_ptr<ast::DDCall>& dc) {
         if (!dc) return true;
+        std::cout << "DDCall (params: " << dc->params.size() << ")" << std::endl;
         return derived().TraverseDDCall(dc);
     }
 
@@ -1122,6 +1156,7 @@ public:
 
     bool VisitTypeName(const std::shared_ptr<ast::TypeName>& tn) {
         if (!tn) return true;
+        std::cout << "TypeName (hasAbstractDeclarator: " << (tn->abstractDecl ? "true" : "false") << ")" << std::endl;
         return derived().TraverseTypeName(tn);
     }
 
@@ -1142,6 +1177,7 @@ public:
 
     bool VisitParameterDecl(const std::shared_ptr<ast::ParameterDecl>& pd) {
         if (!pd) return true;
+        std::cout << "ParameterDecl (hasDeclarator: " << (pd->declarator ? "true" : "false") << ")" << std::endl;
         return derived().TraverseParameterDecl(pd);
     }
 
@@ -1175,6 +1211,7 @@ public:
 
     bool VisitExprInitializer(const std::shared_ptr<ast::ExprInitializer>& ei) {
         if (!ei) return true;
+        std::cout << "ExprInitializer" << std::endl;
         return derived().TraverseExprInitializer(ei);
     }
 
@@ -1192,6 +1229,7 @@ public:
 
     bool VisitInitList(const std::shared_ptr<ast::InitList>& il) {
         if (!il) return true;
+        std::cout << "InitList (elements: " << il->elements.size() << ")" << std::endl;
         return derived().TraverseInitList(il);
     }
 
@@ -1212,6 +1250,7 @@ public:
 
     bool VisitInitDeclarator(const std::shared_ptr<ast::InitDeclarator>& id) {
         if (!id) return true;
+        std::cout << "InitDeclarator (hasInit: " << (id->initializer ? "true" : "false") << ")" << std::endl;
         return derived().TraverseInitDeclarator(id);
     }
 
