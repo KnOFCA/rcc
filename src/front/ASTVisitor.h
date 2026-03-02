@@ -345,6 +345,7 @@ public:
 
     bool VisitCaseStmt(const std::shared_ptr<ast::CaseStmt>& cs) {
         if (!cs) return true;
+        std::cout << "Case: " << std::endl;
         return derived().TraverseCaseStmt(cs);
     }
 
@@ -361,6 +362,7 @@ public:
 
     bool VisitDefaultStmt(const std::shared_ptr<ast::DefaultStmt>& ds) {
         if (!ds) return true;
+        std::cout << "Default: " << std::endl;
         return derived().TraverseDefaultStmt(ds);
     }
 
@@ -621,7 +623,7 @@ public:
         static const char* opNames[] = {
             "COMMA", "ASSIGN", "PLUSASSIGN", "MINUSASSIGN", "MULASSIGN", "DIVASSIGN", "MODASSIGN",
             "ANDASSIGN", "ORASSIGN", "XORASSIGN", "LSASSIGN", "RSASSIGN",
-            "OROR", "ANDAND", "BITOR", "BITXOR", "BITAND", "LSHIFT", "RSHIFT",
+            "OROR", "ANDAND", "BITOR", "BITXOR", "BITAND", "BITNOT", "LSHIFT", "RSHIFT",
             "EQ", "NEQ", "LT", "GT", "LE", "GE",
             "ADD", "SUB", "MUL", "DIV", "MOD",
             "STAR", "AMP", "PLUSPLUS", "MINUSMINUS", "ARRAY", "NONE"

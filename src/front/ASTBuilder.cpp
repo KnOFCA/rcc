@@ -995,6 +995,9 @@ std::any ASTBuilder::visitUnaryOperator(TParser::UnaryOperatorContext *ctx) {
     if (ctx->Minus()) {
         return ast::opcode::SUB; // unary minus represented with SUB
     }
+    if (ctx->Tilde()) {
+        return ast::opcode::BITNOT;
+    }
     // Tilde/Not not represented explicitly in opcode enum -> NONE
     return ast::opcode::NONE;
 }
