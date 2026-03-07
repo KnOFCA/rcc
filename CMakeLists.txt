@@ -108,7 +108,7 @@ set_target_properties(antlr4-demo PROPERTIES
 # 添加依赖关系
 add_dependencies(antlr4-demo GenerateParser)
 
-# 包含目录 - 使用现代target_include_directories
+# 包含目录
 target_include_directories(antlr4-demo PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/generated
@@ -136,7 +136,7 @@ else()
     target_compile_options(antlr4-demo PRIVATE
         -Wall
         -Wextra
-        -Wno-overloaded-virtual  # 抑制ANTLR可能产生的虚函数重载警告
+        -Wno-overloaded-virtual
         -Wno-unused-parameter
     )
     
@@ -161,21 +161,6 @@ install(TARGETS antlr4-demo
         DESTINATION bin
         COMPONENT runtime
 )
-
-# 可选：添加测试支持
-option(BUILD_TESTS "Build tests" OFF)
-if(BUILD_TESTS)
-    enable_testing()
-    
-    # 这里可以添加测试配置
-    # add_subdirectory(tests)
-endif()
-
-# 可选：添加性能优化选项
-option(ENABLE_OPTIMIZATIONS "Enable compiler optimizations" OFF)
-if(ENABLE_OPTIMIZATIONS AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(antlr4-demo PRIVATE -O3 -march=native)
-endif()
 
 # 添加调试信息选项
 option(WITH_DEBUG_INFO "Build with debug information" ON)

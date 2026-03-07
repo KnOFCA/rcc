@@ -9,6 +9,7 @@
 #include "./front/ASTBuilder.h"
 #include "./front/AST.h"
 #include "./front/ASTPrinter.h"
+#include "./ir/IRBuilder.h"
 
 using namespace antlrcpptest;
 using namespace antlr4;
@@ -53,8 +54,11 @@ int main(int argc, const char **argv) {
     }
   }
 
-  rcc::front::ASTPrinter printer;
-  printer.visit(tu);
+  //rcc::front::ASTPrinter printer;
+  //printer.visit(tu);
+
+  rcc::ir::IRBuilder irbuilder;
+  irbuilder.build_from_AST(tu);
 
   if (file.is_open()) {
       file.close();

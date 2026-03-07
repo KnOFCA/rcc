@@ -118,19 +118,23 @@ enum class TypeTag : uint32_t {
 ///
 struct TypeKind {
     TypeTag tag;
-    union {
-        struct {
-            std::shared_ptr<TypeKind> base;
-            std::size_t len;
-        } array;
-        struct {
-            std::shared_ptr<TypeKind> base;
-        } pointer;
-        struct {
-            Slice params;
-            std::shared_ptr<TypeKind> ret;
-        } function;
-    } data;
+
+    struct array {
+        std::shared_ptr<TypeKind> base;
+        std::size_t len;
+    };
+    struct pointer {
+        std::shared_ptr<TypeKind> base;
+    };
+    struct function {
+        Slice params;
+        std::shared_ptr<TypeKind> ret;
+    };
+
+    using Data = std::variant<std::shared_ptr<array>, 
+        std::shared_ptr<pointer>, 
+        std::shared_ptr<function>>;
+    Data data;
 };
 
 ///
@@ -174,6 +178,7 @@ struct BasicBlockData {
     /// Name of basic block, null if no name.
     std::optional<std::string> name;
     /// Parameters.
+    /// for SSA only
     Slice params;
     /// Values that this basic block is used by.
     Slice used_by;
@@ -266,6 +271,7 @@ struct FuncArgRef {
 
 ///
 /// Raw basic block argument reference.
+/// for SSA only
 ///
 struct BlockArgRef {
     /// Index.
@@ -381,8 +387,10 @@ struct Branch {
     /// Target if condition is `false`.
     BasicBlock false_bb;
     /// Arguments of `true` target..
+    /// for SSA only
     Slice true_args;
     /// Arguments of `false` target..
+    /// for SSA only
     Slice false_args;
 };
 
@@ -393,6 +401,7 @@ struct Jump {
     /// Target.
     BasicBlock target;
     /// Arguments of target..
+    /// for SSA only
     Slice args;
 };
 
@@ -478,7 +487,7 @@ struct ValueKind {
 };
 
 struct ValueData {
-    /// Type of value.
+    /// Type of value: array, pointer, funtion.
     Type ty;
     /// Name of value, null if no name.
     std::optional<std::string> name;

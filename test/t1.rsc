@@ -1,9 +1,10 @@
+#include <cstddef>
 int *ptr;                      // 指针
 int arr[10];                   // 数组
 int *ptr_arr[5];               // 指针数组
 int (*func_ptr)(int, int);     // 函数指针
 int (*arr_ptr)[10];            // 数组指针
-const int *const const_ptr = nullptr;    // 常量指针
+const int *const const_ptr = 0;    // 常量指针
 int (*complex_arr[3])(int);    // 函数指针数组
 
 /* ------------------- 表达式与运算符测试 ------------------- */
@@ -119,6 +120,8 @@ void test_arrays(void) {
     // 数组访问
     arr1[0] = 100;
     arr2[1][2] = 200;
+    str1[0] = 'M';
+    str2[1] = 'o';
 }
 
 /* ------------------- 指针运算测试 ------------------- */

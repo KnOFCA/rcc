@@ -3,159 +3,109 @@
 #include "koopa.h"
 #include "front/AST.h"
 #include "front/ASTVisitor.h"
+#include "front/FrontSymtab.h"
 
 #include <filesystem>
 #include <span>
-
 
 namespace rcc::ir {
 
 class IRBuilder : public front::ASTVisitor<IRBuilder> {
   public:
     std::shared_ptr<Program> program;
+    symtab::SymbolTable symtab;
+    Function currentFunc_;
+    BasicBlock currentBB_;
+    std::vector<BasicBlock> breakStack_;
+    std::vector<BasicBlock> continueStack_;
+    long tempCounter_ = 0;
     
-    ///
-    /// Generate Koopa IR program from AST.
-    /// Updates the `program` if no errors occurred.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode parse_from_AST(std::shared_ptr<ast::TranslationUnit> node);
+    // 从 AST 生成 IR 程序
+    ErrorCode build_from_AST(std::shared_ptr<ast::TranslationUnit> node);
 
-    ///
-    /// Parses text-form Koopa IR program from the given file.
-    /// Updates the `program` if no errors occurred.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode parse_from_file(const std::filesystem::path& path);
-
-    ///
-    /// Parses text-form Koopa IR program from the given string.
-    /// Updates the `program` if no errors occurred.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode parse_from_string(std::string_view str);
-
-    ///
-    /// Parses text-form Koopa IR program from the standard input.
-    /// Updates the `program` if no errors occurred.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode parse_from_stdin();
-
-    ///
-    /// Parses text-form Koopa IR program from the given
-    /// file descriptor (UNIX) or handle (Windows).
-    /// Updates the `program` if no errors occurred.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode parse_from_raw(File file);
-
-    ///
-    /// Deletes the given program.
-    ///
-    /// All programs returned by Koopa IR library functions
-    /// should be deleted manually.
-    ///
+    // 程序生命周期管理
     void delete_program();
+    std::shared_ptr<Program> get_program() const;
 
-    ///
-    /// Generates text-form Koopa IR program to the given file.
-    ///
-    /// Returns the error code.
-    ///
+    // 处理函数定义
+    Function build_function(const std::shared_ptr<ast::FunctionDef>& fdef);
+
+    // 处理全局声明/变量
+    Value build_global_declaration(const std::shared_ptr<ast::Declaration>& decl);
+
+    // 处理局部声明
+    Value build_local_declaration(const std::shared_ptr<ast::Declaration>& decl);
+
+    // 基本块管理
+    BasicBlock create_basic_block(const std::string& name = "");
+    void set_insert_point(BasicBlock bb);
+
+    // 复合语句
+    void build_stmt(const std::shared_ptr<ast::Stmt>& stmt);
+    void build_compound_stmt(const std::shared_ptr<ast::CompoundStmt>& comp);
+    bool current_block_terminated() const;
+
+    // 控制流语句
+    void build_if_stmt(const std::shared_ptr<ast::IfStmt>& ifs);
+    void build_while_stmt(const std::shared_ptr<ast::WhileStmt>& ws);
+    void build_for_stmt(const std::shared_ptr<ast::ForStmt>& fs);
+    void build_return_stmt(const std::shared_ptr<ast::ReturnStmt>& rs);
+    void build_break_stmt();
+    void build_continue_stmt();
+
+    // 表达式求值，返回生成的 Value
+    Value build_expr(const std::shared_ptr<ast::Expr>& expr);
+
+    // 表达式
+    Value build_binary_expr(const std::shared_ptr<ast::BinaryExpr>& bin);
+    Value build_unary_expr(const std::shared_ptr<ast::UnaryExpr>& un);
+    Value build_postfix_expr(const std::shared_ptr<ast::PostfixExpr>& post);
+    Value build_call_expr(const std::shared_ptr<ast::CallExpr>& call);
+    Value build_id_expr(const std::shared_ptr<ast::IdExpr>& id);
+    Value build_literal_expr(const std::shared_ptr<ast::LiteralExpr>& lit);
+    Value build_conditional_expr(const std::shared_ptr<ast::ConditionalExpr>& ce);
+
+    // 左值处理（用于赋值）
+    Value build_lvalue(const std::shared_ptr<ast::Expr>& expr);
+
+    // 从 AST 类型说明符生成 Koopa 类型
+    Type build_type(const std::shared_ptr<ast::DeclSpec>& specs, 
+                    const std::shared_ptr<ast::Declarator>& decl);
+
+    // 处理指针类型
+    Type build_pointer_type(Type base);
+
+    // 处理数组类型
+    Type build_array_type(Type base, std::size_t size);
+
+    // 处理函数类型
+    Type build_function_type(Type ret, const std::vector<Type>& params);
+
+    // 常量生成
+    Value build_integer_const(int32_t value);
+    Value build_float_const(float value);
+
+    // 内存操作
+    Value build_alloca(Type ty);
+    Value build_load(Value ptr);
+    void build_store(Value value, Value ptr);
+
+    // 二元运算
+    Value build_binary(BinaryOp op, Value lhs, Value rhs);
+
+    // 控制流
+    void build_br(BasicBlock target);
+    void build_cond_br(Value cond, BasicBlock true_bb, BasicBlock false_bb);
+
+    // 函数调用
+    Value build_call(Function func, const std::vector<Value>& args);
+
+    // 返回
+    void build_ret(Value value = nullptr);
+
     ErrorCode dump_to_file(const std::filesystem::path& path);
-
-    ///
-    /// Generates a null-terminated string of text-form Koopa IR program
-    /// to the given buffer. If the given buffer is null, updates the `len`
-    /// to the length of the generated string (with out the null-terminator).
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode dump_to_string(std::span<char> buffer, std::size_t* len);
-
-    ///
-    /// Generates text-form Koopa IR program to the standard output.
-    ///
-    /// Returns the error code.
-    ///
     ErrorCode dump_to_stdout();
-
-    ///
-    /// Generates text-form Koopa IR program to the given
-    /// file descriptor (UNIX) or handle (Windows).
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode dump_to_raw(File file);
-
-    ///
-    /// Generates LLVM IR to the given file.
-    ///
-    /// Returns the error code.
-    ///
     ErrorCode dump_llvm_to_file(const std::filesystem::path& path);
-
-    ///
-    /// Generates a null-terminated string of LLVM IR to the given buffer.
-    /// If the given buffer is null, updates the `len` to the length of
-    /// the generated string (with out the null-terminator).
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode dump_llvm_to_string(std::span<char> buffer, std::size_t* len);
-
-    ///
-    /// Generates LLVM IR to the standard output.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode dump_llvm_to_stdout();
-
-    ///
-    /// Generates LLVM IR to the given
-    /// file descriptor (UNIX) or handle (Windows).
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode dump_llvm_to_raw(File file);
-
-    ///
-    /// Generates the given raw program to the Koopa IR program.
-    /// Updates the `program` if no errors occurred.
-    ///
-    /// Returns the error code.
-    ///
-    ErrorCode generate_to_koopa(const Program* raw, Program* program);
-
-    ///
-    /// visit method.
-    ///
-    void visitTranslationUnit(const std::shared_ptr<ast::TranslationUnit> &tu) override;
-
-    void visitDeclaration(const std::shared_ptr<ast::Declaration> &decl) override;
-    void visitFunctionDef(const std::shared_ptr<ast::FunctionDef> &fdef) override;
-
-    void visitStmt(const std::shared_ptr<ast::Stmt> &stmt) override;
-    void visitCompoundStmt(const std::shared_ptr<ast::CompoundStmt> &comp) override;
-
-    void visitExpr(const std::shared_ptr<ast::Expr> &expr) override;
-    void visitIdExpr(const std::shared_ptr<ast::IdExpr> &id) override;
-    void visitLiteralExpr(const std::shared_ptr<ast::LiteralExpr> &lit) override;
-    void visitUnaryExpr(const std::shared_ptr<ast::UnaryExpr> &un) override;
-    void visitBinaryExpr(const std::shared_ptr<ast::BinaryExpr> &bin) override;
-    void visitConditionalExpr(const std::shared_ptr<ast::ConditionalExpr> &ce) override;
-    void visitCallExpr(const std::shared_ptr<ast::CallExpr> &call) override;
-    void visitPostfixExpr(const std::shared_ptr<ast::PostfixExpr> &post) override;
-
-    void visitDeclarator(const std::shared_ptr<ast::Declarator> &decl) override;
-    void visitTypeName(const std::shared_ptr<ast::TypeName> &tn) override;
-
 };
 
 }

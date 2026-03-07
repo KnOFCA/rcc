@@ -34,6 +34,6 @@ class SymtabCollector : public ASTVisitor<SymtabCollector> {
     void visitTypeName(const std::shared_ptr<ast::TypeName> &tn);
 
   private:
-    SymbolTable table;
+    rcc::symtab::SymbolTable table;
 };
 }
