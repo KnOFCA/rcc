@@ -446,7 +446,12 @@ Value IRBuilder::build_binary_expr(const std::shared_ptr<BinaryExpr>& bin) {
         bin->op == opcode::MINUSASSIGN ||
         bin->op == opcode::MULASSIGN ||
         bin->op == opcode::DIVASSIGN ||
-        bin->op == opcode::MODASSIGN) {
+        bin->op == opcode::MODASSIGN ||
+        bin->op == opcode::ANDASSIGN ||
+        bin->op == opcode::ORASSIGN ||
+        bin->op == opcode::XORASSIGN ||
+        bin->op == opcode::LSASSIGN ||
+        bin->op == opcode::RSASSIGN) {
         Value addr = build_lvalue(lhsExpr);
         if (!addr) return nullptr;
 
@@ -465,6 +470,11 @@ Value IRBuilder::build_binary_expr(const std::shared_ptr<BinaryExpr>& bin) {
             case opcode::MULASSIGN: bop = BinaryOp::MUL; break;
             case opcode::DIVASSIGN: bop = BinaryOp::DIV; break;
             case opcode::MODASSIGN: bop = BinaryOp::MOD; break;
+            case opcode::ANDASSIGN: bop = BinaryOp::AND; break;
+            case opcode::ORASSIGN:  bop = BinaryOp::OR; break;
+            case opcode::XORASSIGN: bop = BinaryOp::XOR; break;
+            case opcode::LSASSIGN:  bop = BinaryOp::SHL; break;
+            case opcode::RSASSIGN:  bop = BinaryOp::SAR; break;
             default: break;
         }
 
@@ -492,6 +502,11 @@ Value IRBuilder::build_binary_expr(const std::shared_ptr<BinaryExpr>& bin) {
         case opcode::GE:  op = BinaryOp::GE; break;
         case opcode::ANDAND: op = BinaryOp::AND; break;
         case opcode::OROR:   op = BinaryOp::OR; break;
+        case opcode::BITAND: op = BinaryOp::AND; break;
+        case opcode::BITOR:  op = BinaryOp::OR; break;
+        case opcode::BITXOR: op = BinaryOp::XOR; break;
+        case opcode::LSHIFT: op = BinaryOp::SHL; break;
+        case opcode::RSHIFT: op = BinaryOp::SAR; break;
         default: return nullptr;
     }
     
@@ -519,6 +534,11 @@ Value IRBuilder::build_unary_expr(const std::shared_ptr<UnaryExpr>& un) {
                 oldVal, one);
             build_store(newVal, addr);
             return newVal;
+        }
+        case opcode::BITNOT: {
+            // ~x == x ^ -1
+            Value allOnes = build_integer_const(-1);
+            return build_binary(BinaryOp::XOR, operand, allOnes);
         }
         default: break;
     }
