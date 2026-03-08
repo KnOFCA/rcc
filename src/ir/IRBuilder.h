@@ -101,6 +101,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
     Value build_alloca(Type ty);
     Value build_load(Value ptr);
     void build_store(Value value, Value ptr);
+    Value build_get_ptr(Value src, Value index);
 
     // 二元运算
     Value build_binary(BinaryOp op, Value lhs, Value rhs);

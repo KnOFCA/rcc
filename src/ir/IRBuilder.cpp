@@ -691,13 +691,56 @@ Value IRBuilder::build_binary_expr(const std::shared_ptr<BinaryExpr>& bin) {
         }
 
         Value oldVal = build_load(addr);
-        Value newVal = build_binary(bop, oldVal, rhs);
+        Value newVal = nullptr;
+        if (oldVal && oldVal->ty && oldVal->ty->tag == TypeTag::POINTER &&
+            rhs && rhs->ty && is_integer_type(rhs->ty) &&
+            (bin->op == opcode::PLUSASSIGN || bin->op == opcode::MINUSASSIGN)) {
+            Value index = rhs;
+            if (bin->op == opcode::MINUSASSIGN) {
+                Value zero = build_integer_const(0);
+                index = build_binary(BinaryOp::SUB, zero, rhs);
+            }
+            newVal = build_get_ptr(oldVal, index);
+        } else {
+            newVal = build_binary(bop, oldVal, rhs);
+        }
         build_store(newVal, addr);
         return newVal;
     }
 
     Value lhs = build_expr(lhsExpr);
     Value rhs = build_expr(rhsExpr);
+
+    if (bin->op == opcode::ADD || bin->op == opcode::SUB) {
+        const bool lhsPtr = lhs && lhs->ty && lhs->ty->tag == TypeTag::POINTER;
+        const bool rhsPtr = rhs && rhs->ty && rhs->ty->tag == TypeTag::POINTER;
+        const bool lhsInt = lhs && lhs->ty && is_integer_type(lhs->ty);
+        const bool rhsInt = rhs && rhs->ty && is_integer_type(rhs->ty);
+
+        if (bin->op == opcode::ADD) {
+            if (lhsPtr && rhsInt) {
+                return build_get_ptr(lhs, rhs);
+            }
+            if (lhsInt && rhsPtr) {
+                return build_get_ptr(rhs, lhs);
+            }
+        } else { // SUB
+            if (lhsPtr && rhsInt) {
+                Value zero = build_integer_const(0);
+                Value neg = build_binary(BinaryOp::SUB, zero, rhs);
+                return build_get_ptr(lhs, neg);
+            }
+            if (lhsPtr && rhsPtr) {
+                Value diff = build_binary(BinaryOp::SUB, lhs, rhs);
+                if (diff) {
+                    auto intTy = std::make_shared<TypeKind>();
+                    intTy->tag = TypeTag::INT32;
+                    diff->ty = intTy;
+                }
+                return diff;
+            }
+        }
+    }
 
     BinaryOp op;
     switch (bin->op) {
@@ -740,10 +783,16 @@ Value IRBuilder::build_unary_expr(const std::shared_ptr<UnaryExpr>& un) {
             // 前缀 ++/--: 先修改再返回
             Value addr = build_lvalue(std::dynamic_pointer_cast<Expr>(un->operand));
             Value oldVal = build_load(addr);
-            Value one = build_integer_const(1);
-            Value newVal = build_binary(
-                un->op == opcode::PLUSPLUS ? BinaryOp::ADD : BinaryOp::SUB,
-                oldVal, one);
+            Value newVal = nullptr;
+            if (oldVal && oldVal->ty && oldVal->ty->tag == TypeTag::POINTER) {
+                Value index = build_integer_const(un->op == opcode::PLUSPLUS ? 1 : -1);
+                newVal = build_get_ptr(oldVal, index);
+            } else {
+                Value one = build_integer_const(1);
+                newVal = build_binary(
+                    un->op == opcode::PLUSPLUS ? BinaryOp::ADD : BinaryOp::SUB,
+                    oldVal, one);
+            }
             build_store(newVal, addr);
             return newVal;
         }
@@ -784,10 +833,16 @@ Value IRBuilder::build_postfix_expr(const std::shared_ptr<PostfixExpr>& post) {
         auto target = std::dynamic_pointer_cast<Expr>(post->expr);
         Value addr = build_lvalue(target);
         Value oldVal = build_load(addr);
-        Value one = build_integer_const(1);
-        Value newVal = build_binary(
-            post->op == opcode::PLUSPLUS ? BinaryOp::ADD : BinaryOp::SUB,
-            oldVal, one);
+        Value newVal = nullptr;
+        if (oldVal && oldVal->ty && oldVal->ty->tag == TypeTag::POINTER) {
+            Value index = build_integer_const(post->op == opcode::PLUSPLUS ? 1 : -1);
+            newVal = build_get_ptr(oldVal, index);
+        } else {
+            Value one = build_integer_const(1);
+            newVal = build_binary(
+                post->op == opcode::PLUSPLUS ? BinaryOp::ADD : BinaryOp::SUB,
+                oldVal, one);
+        }
         build_store(newVal, addr);
         return oldVal;
     }
@@ -1258,6 +1313,22 @@ void IRBuilder::build_store(Value value, Value ptr) {
     if (currentBB_) {
         currentBB_->insts.buffer.push_back(valData);
     }
+}
+
+// for pointer calculate like ++, --
+Value IRBuilder::build_get_ptr(Value src, Value index) {
+    if (!src || !index) return nullptr;
+
+    auto valData = std::make_shared<ValueData>();
+    valData->name = "%" + std::to_string(tempCounter_++);
+    valData->kind.tag = ValueTag::GET_PTR;
+    valData->kind.data = GetPtr{src, index};
+    valData->ty = src->ty;
+
+    if (currentBB_) {
+        currentBB_->insts.buffer.push_back(valData);
+    }
+    return valData;
 }
 
 Value IRBuilder::build_binary(BinaryOp op, Value lhs, Value rhs) {
