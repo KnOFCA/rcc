@@ -1,4 +1,4 @@
 int main()
 {
-    int arr[3][4];
+    int arr[5] = {1, 2, 3, 4, 5};
 }

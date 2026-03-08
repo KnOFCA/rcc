@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <functional>
+#include <algorithm>
 
 namespace rcc::ir {
 
@@ -110,6 +111,21 @@ bool is_integer_type(Type ty) {
 bool is_float_type(Type ty) {
     if (!ty) return false;
     return ty->tag == TypeTag::FLOAT || ty->tag == TypeTag::DOUBLE;
+}
+
+Type pointee_type(Type ptrTy) {
+    if (!ptrTy || ptrTy->tag != TypeTag::POINTER) return nullptr;
+    auto ptr = std::get<std::shared_ptr<TypeKind::pointer>>(ptrTy->data);
+    if (!ptr) return nullptr;
+    return ptr->base;
+}
+
+Value build_zero_scalar(IRBuilder& builder, Type ty) {
+    if (!ty) return builder.build_integer_const(0);
+    if (is_float_type(ty)) {
+        return builder.build_float_const(0.0f);
+    }
+    return builder.build_integer_const(0);
 }
 
 void collect_switch_labels(
@@ -862,8 +878,100 @@ Value IRBuilder::build_local_declaration(const std::shared_ptr<Declaration>& dec
         if (initDecl->initializer) {
             if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
                 Value initVal = build_expr(std::dynamic_pointer_cast<Expr>(exprInit->expr));
-                if (initVal)
+                if (initVal) {
                     build_store(initVal, addr);
+                }
+            } else if (auto initList = std::dynamic_pointer_cast<InitList>(initDecl->initializer)) {
+                Type objectTy = pointee_type(addr->ty);
+
+                std::function<void(Value, Type)> emit_zero_init;
+                std::function<void(Value, Type, const std::shared_ptr<InitList>&)> emit_array_init;
+
+                emit_zero_init = [&](Value objAddr, Type objTy) {
+                    if (!objAddr || !objTy) return;
+
+                    if (objTy->tag == TypeTag::ARRAY) {
+                        auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(objTy->data);
+                        if (!arrTy || !arrTy->base) return;
+
+                        for (std::size_t i = 0; i < arrTy->len; ++i) {
+                            auto idx = build_integer_const(static_cast<int32_t>(i));
+                            auto elemAddr = std::make_shared<ValueData>();
+                            elemAddr->name = "%" + std::to_string(tempCounter_++);
+                            elemAddr->ty = build_pointer_type(arrTy->base);
+                            elemAddr->kind.tag = ValueTag::GET_ELEM_PTR;
+                            elemAddr->kind.data = GetElemPtr{objAddr, idx};
+                            if (currentBB_) currentBB_->insts.buffer.push_back(elemAddr);
+
+                            emit_zero_init(elemAddr, arrTy->base);
+                        }
+                        return;
+                    }
+
+                    build_store(build_zero_scalar(*this, objTy), objAddr);
+                };
+
+                emit_array_init = [&](Value arrayAddr, Type arrayTy, const std::shared_ptr<InitList>& list) {
+                    if (!arrayAddr || !arrayTy || !list || arrayTy->tag != TypeTag::ARRAY) return;
+
+                    auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(arrayTy->data);
+                    if (!arrTy || !arrTy->base) return;
+
+                    const std::size_t initCount = std::min(arrTy->len, list->elements.size());
+                    std::size_t i = 0;
+                    for (; i < initCount; ++i) {
+                        auto idx = build_integer_const(static_cast<int32_t>(i));
+                        auto elemAddr = std::make_shared<ValueData>();
+                        elemAddr->name = "%" + std::to_string(tempCounter_++);
+                        elemAddr->ty = build_pointer_type(arrTy->base);
+                        elemAddr->kind.tag = ValueTag::GET_ELEM_PTR;
+                        elemAddr->kind.data = GetElemPtr{arrayAddr, idx};
+                        if (currentBB_) currentBB_->insts.buffer.push_back(elemAddr);
+
+                        auto elemInit = list->elements[i];
+                        if (arrTy->base->tag == TypeTag::ARRAY) {
+                            if (auto nested = std::dynamic_pointer_cast<InitList>(elemInit)) {
+                                emit_array_init(elemAddr, arrTy->base, nested);
+                            } else {
+                                emit_zero_init(elemAddr, arrTy->base);
+                            }
+                        } else {
+                            if (auto exprElem = std::dynamic_pointer_cast<ExprInitializer>(elemInit)) {
+                                Value elemVal = build_expr(std::dynamic_pointer_cast<Expr>(exprElem->expr));
+                                if (elemVal) {
+                                    build_store(elemVal, elemAddr);
+                                } else {
+                                    build_store(build_zero_scalar(*this, arrTy->base), elemAddr);
+                                }
+                            } else {
+                                build_store(build_zero_scalar(*this, arrTy->base), elemAddr);
+                            }
+                        }
+                    }
+
+                    for (; i < arrTy->len; ++i) {
+                        auto idx = build_integer_const(static_cast<int32_t>(i));
+                        auto elemAddr = std::make_shared<ValueData>();
+                        elemAddr->name = "%" + std::to_string(tempCounter_++);
+                        elemAddr->ty = build_pointer_type(arrTy->base);
+                        elemAddr->kind.tag = ValueTag::GET_ELEM_PTR;
+                        elemAddr->kind.data = GetElemPtr{arrayAddr, idx};
+                        if (currentBB_) currentBB_->insts.buffer.push_back(elemAddr);
+
+                        emit_zero_init(elemAddr, arrTy->base);
+                    }
+                };
+
+                if (objectTy && objectTy->tag == TypeTag::ARRAY) {
+                    emit_array_init(addr, objectTy, initList);
+                } else if (!initList->elements.empty()) {
+                    if (auto scalarInit = std::dynamic_pointer_cast<ExprInitializer>(initList->elements.front())) {
+                        Value initVal = build_expr(std::dynamic_pointer_cast<Expr>(scalarInit->expr));
+                        if (initVal) {
+                            build_store(initVal, addr);
+                        }
+                    }
+                }
             }
         }
     }
