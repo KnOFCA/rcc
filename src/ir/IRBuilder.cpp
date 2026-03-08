@@ -94,6 +94,75 @@ int32_t parse_char_literal_value(const std::string& raw) {
     }
 }
 
+bool is_integer_type(Type ty) {
+    if (!ty) return false;
+    switch (ty->tag) {
+        case TypeTag::INT8:
+        case TypeTag::INT16:
+        case TypeTag::INT32:
+        case TypeTag::INT64:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool is_float_type(Type ty) {
+    if (!ty) return false;
+    return ty->tag == TypeTag::FLOAT || ty->tag == TypeTag::DOUBLE;
+}
+
+void collect_switch_labels(
+    const std::shared_ptr<Stmt>& stmt,
+    std::vector<std::shared_ptr<CaseStmt>>& cases,
+    std::vector<std::shared_ptr<DefaultStmt>>& defaults) {
+    if (!stmt) return;
+
+    if (auto cs = std::dynamic_pointer_cast<CaseStmt>(stmt)) {
+        cases.push_back(cs);
+        collect_switch_labels(cs->stmt, cases, defaults);
+        return;
+    }
+    if (auto ds = std::dynamic_pointer_cast<DefaultStmt>(stmt)) {
+        defaults.push_back(ds);
+        collect_switch_labels(ds->stmt, cases, defaults);
+        return;
+    }
+    if (std::dynamic_pointer_cast<SwitchStmt>(stmt)) {
+        // nested switch has its own case/default labels
+        return;
+    }
+    if (auto comp = std::dynamic_pointer_cast<CompoundStmt>(stmt)) {
+        for (const auto& item : comp->items) {
+            auto stmtItem = std::dynamic_pointer_cast<StmtItem>(item);
+            if (!stmtItem) continue;
+            collect_switch_labels(stmtItem->stmt, cases, defaults);
+        }
+        return;
+    }
+    if (auto ls = std::dynamic_pointer_cast<LabelStmt>(stmt)) {
+        collect_switch_labels(ls->stmt, cases, defaults);
+        return;
+    }
+    if (auto ifs = std::dynamic_pointer_cast<IfStmt>(stmt)) {
+        collect_switch_labels(ifs->thenStmt, cases, defaults);
+        collect_switch_labels(ifs->elseStmt, cases, defaults);
+        return;
+    }
+    if (auto ws = std::dynamic_pointer_cast<WhileStmt>(stmt)) {
+        collect_switch_labels(ws->body, cases, defaults);
+        return;
+    }
+    if (auto dws = std::dynamic_pointer_cast<DoWhileStmt>(stmt)) {
+        collect_switch_labels(dws->body, cases, defaults);
+        return;
+    }
+    if (auto fs = std::dynamic_pointer_cast<ForStmt>(stmt)) {
+        collect_switch_labels(fs->body, cases, defaults);
+        return;
+    }
+}
+
 } // namespace
 
 // ============================================================================
@@ -137,6 +206,7 @@ Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
     auto funcData = std::make_shared<FunctionData>();
     funcData->ty = funcType;
     currentFunc_ = funcData;
+    bbNameCounters_.clear();
     
     // 提取函数名
     if (fdef->declarator && fdef->declarator->direct) {
@@ -239,7 +309,13 @@ Value IRBuilder::build_global_declaration(const std::shared_ptr<Declaration>& de
 BasicBlock IRBuilder::create_basic_block(const std::string& name) {
     auto bb = std::make_shared<BasicBlockData>();
     if (!name.empty()) {
-        bb->name = "%" + name;
+        std::size_t& counter = bbNameCounters_[name];
+        if (counter == 0) {
+            bb->name = "%" + name;
+        } else {
+            bb->name = "%" + name + "." + std::to_string(counter);
+        }
+        ++counter;
     }
     if (currentFunc_) {
         currentFunc_->bbs.buffer.push_back(bb);
@@ -273,6 +349,8 @@ void IRBuilder::build_stmt(const std::shared_ptr<ast::Stmt>& stmt) {
         build_expr(std::dynamic_pointer_cast<Expr>(exprStmt->expr));
     } else if (auto ifs = std::dynamic_pointer_cast<IfStmt>(stmt)) {
         build_if_stmt(ifs);
+    } else if (auto ss = std::dynamic_pointer_cast<SwitchStmt>(stmt)) {
+        build_switch_stmt(ss);
     } else if (auto fs = std::dynamic_pointer_cast<ForStmt>(stmt)) {
         build_for_stmt(fs);
     } else if (auto ws = std::dynamic_pointer_cast<WhileStmt>(stmt)) {
@@ -283,19 +361,37 @@ void IRBuilder::build_stmt(const std::shared_ptr<ast::Stmt>& stmt) {
         fake->cond = dws->cond;
         fake->body = dws->body;
         build_while_stmt(fake);
-    } else if (auto ss = std::dynamic_pointer_cast<SwitchStmt>(stmt)) {
-        if (ss->expr) {
-            build_expr(std::dynamic_pointer_cast<Expr>(ss->expr));
-        }
-        build_stmt(ss->stmt);
     } else if (auto ls = std::dynamic_pointer_cast<LabelStmt>(stmt)) {
         build_stmt(ls->stmt);
     } else if (auto cs = std::dynamic_pointer_cast<CaseStmt>(stmt)) {
-        if (cs->expr) {
-            build_expr(std::dynamic_pointer_cast<Expr>(cs->expr));
+        BasicBlock caseBB = nullptr;
+        if (!switchStack_.empty()) {
+            auto it = switchStack_.back().caseBBs.find(cs.get());
+            if (it != switchStack_.back().caseBBs.end()) {
+                caseBB = it->second;
+            }
+        }
+        if (caseBB) {
+            if (!current_block_terminated()) {
+                build_br(caseBB);
+            }
+            set_insert_point(caseBB);
         }
         build_stmt(cs->stmt);
     } else if (auto ds = std::dynamic_pointer_cast<DefaultStmt>(stmt)) {
+        BasicBlock defaultBB = nullptr;
+        if (!switchStack_.empty()) {
+            auto it = switchStack_.back().defaultBBs.find(ds.get());
+            if (it != switchStack_.back().defaultBBs.end()) {
+                defaultBB = it->second;
+            }
+        }
+        if (defaultBB) {
+            if (!current_block_terminated()) {
+                build_br(defaultBB);
+            }
+            set_insert_point(defaultBB);
+        }
         build_stmt(ds->stmt);
     } else if (std::dynamic_pointer_cast<GotoStmt>(stmt)) {
         // TODO: 支持 goto/label 跳转
@@ -367,6 +463,69 @@ void IRBuilder::build_if_stmt(const std::shared_ptr<IfStmt>& ifs) {
     set_insert_point(mergeBB);
 }
 
+void IRBuilder::build_switch_stmt(const std::shared_ptr<SwitchStmt>& ss) {
+    if (!ss) return;
+
+    Value cond = build_expr(std::dynamic_pointer_cast<Expr>(ss->expr));
+    if (!cond) return;
+
+    std::vector<std::shared_ptr<CaseStmt>> cases;
+    std::vector<std::shared_ptr<DefaultStmt>> defaults;
+    collect_switch_labels(ss->stmt, cases, defaults);
+
+    BasicBlock endBB = create_basic_block("switch.end");
+    BasicBlock defaultTarget = !defaults.empty() ? create_basic_block("switch.default") : endBB;
+
+    SwitchContext ctx;
+    ctx.endBB = endBB;
+    if (!defaults.empty()) {
+        ctx.defaultBBs.emplace(defaults.front().get(), defaultTarget);
+    }
+    for (std::size_t i = 0; i < cases.size(); ++i) {
+        ctx.caseBBs.emplace(cases[i].get(), create_basic_block("switch.case"));
+    }
+
+    BasicBlock dispatchBB = create_basic_block("switch.dispatch");
+    if (!current_block_terminated()) {
+        build_br(dispatchBB);
+    }
+
+    set_insert_point(dispatchBB);
+    if (cases.empty()) {
+        if (defaultTarget) {
+            build_br(defaultTarget);
+        }
+    } else {
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            Value caseVal = build_expr(std::dynamic_pointer_cast<Expr>(cases[i]->expr));
+            if (!caseVal) continue;
+            Value matched = build_binary(BinaryOp::EQ, cond, caseVal);
+            BasicBlock nextDispatch = (i + 1 < cases.size())
+                ? create_basic_block("switch.dispatch")
+                : defaultTarget;
+            build_cond_br(matched, ctx.caseBBs[cases[i].get()], nextDispatch);
+            if (i + 1 < cases.size()) {
+                set_insert_point(nextDispatch);
+            }
+        }
+    }
+
+    breakStack_.push_back(endBB);
+    switchStack_.push_back(std::move(ctx));
+
+    // Unlabeled statements before first case/default are unreachable in normal flow.
+    set_insert_point(create_basic_block("switch.body"));
+    build_stmt(ss->stmt);
+
+    if (!current_block_terminated()) {
+        build_br(endBB);
+    }
+
+    switchStack_.pop_back();
+    breakStack_.pop_back();
+    set_insert_point(endBB);
+}
+
 void IRBuilder::build_while_stmt(const std::shared_ptr<WhileStmt>& ws) {
     if (!ws) return;
     
@@ -429,6 +588,8 @@ Value IRBuilder::build_expr(const std::shared_ptr<Expr>& expr) {
         return build_call_expr(call);
     } else if (auto cond = std::dynamic_pointer_cast<ConditionalExpr>(expr)) {
         return build_conditional_expr(cond);
+    } else if (auto cast = std::dynamic_pointer_cast<CastExpr>(expr)) {
+        return build_cast_expr(cast);
     }
     
     return nullptr;
@@ -787,6 +948,34 @@ Value IRBuilder::build_conditional_expr(const std::shared_ptr<ConditionalExpr>& 
     return build_load(resultAddr);
 }
 
+Value IRBuilder::build_cast_expr(const std::shared_ptr<CastExpr>& cast) {
+    if (!cast) return nullptr;
+
+    Value src = build_expr(std::dynamic_pointer_cast<Expr>(cast->expr));
+    if (!src) return nullptr;
+
+    Type dstTy = nullptr;
+    if (cast->type) {
+        dstTy = build_type(cast->type->specs, nullptr);
+    }
+    if (!dstTy || !src->ty) {
+        return src;
+    }
+
+    if (src->ty->tag == dstTy->tag) {
+        return src;
+    }
+
+    if (is_integer_type(src->ty) && is_float_type(dstTy)) {
+        return build_cast(CastOp::SITOFP, src, dstTy);
+    }
+    if (is_float_type(src->ty) && is_integer_type(dstTy)) {
+        return build_cast(CastOp::FPTOSI, src, dstTy);
+    }
+
+    return src;
+}
+
 Value IRBuilder::build_lvalue(const std::shared_ptr<ast::Expr>& expr) {
     if (!expr) return nullptr;
 
@@ -902,6 +1091,12 @@ Value IRBuilder::build_load(Value ptr) {
     valData->name = "%" + std::to_string(tempCounter_++);
     valData->kind.tag = ValueTag::LOAD;
     valData->kind.data = Load{ptr};
+    if (ptr->ty && ptr->ty->tag == TypeTag::POINTER) {
+        auto ptrData = std::get<std::shared_ptr<TypeKind::pointer>>(ptr->ty->data);
+        if (ptrData) {
+            valData->ty = ptrData->base;
+        }
+    }
     
     if (currentBB_) {
         currentBB_->insts.buffer.push_back(valData);
@@ -929,11 +1124,28 @@ Value IRBuilder::build_binary(BinaryOp op, Value lhs, Value rhs) {
     valData->name = "%" + std::to_string(tempCounter_++);
     valData->kind.tag = ValueTag::BINARY;
     valData->kind.data = Binary{op, lhs, rhs};
+    valData->ty = lhs->ty;
     
     if (currentBB_) {
         currentBB_->insts.buffer.push_back(valData);
     }
     
+    return valData;
+}
+
+Value IRBuilder::build_cast(CastOp op, Value value, Type targetTy) {
+    if (!value || !targetTy) return nullptr;
+
+    auto valData = std::make_shared<ValueData>();
+    valData->name = "%" + std::to_string(tempCounter_++);
+    valData->ty = targetTy;
+    valData->kind.tag = ValueTag::CAST;
+    valData->kind.data = Cast{op, value};
+
+    if (currentBB_) {
+        currentBB_->insts.buffer.push_back(valData);
+    }
+
     return valData;
 }
 

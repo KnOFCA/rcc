@@ -7,17 +7,26 @@
 
 #include <filesystem>
 #include <span>
+#include <unordered_map>
 
 namespace rcc::ir {
 
 class IRBuilder : public front::ASTVisitor<IRBuilder> {
   public:
+    struct SwitchContext {
+        BasicBlock endBB;
+        std::unordered_map<const ast::CaseStmt*, BasicBlock> caseBBs;
+        std::unordered_map<const ast::DefaultStmt*, BasicBlock> defaultBBs;
+    };
+
     std::shared_ptr<Program> program;
     symtab::SymbolTable symtab;
     Function currentFunc_;
     BasicBlock currentBB_;
     std::vector<BasicBlock> breakStack_;
     std::vector<BasicBlock> continueStack_;
+    std::vector<SwitchContext> switchStack_;
+    std::unordered_map<std::string, std::size_t> bbNameCounters_;
     long tempCounter_ = 0;
     
     // 从 AST 生成 IR 程序
@@ -47,6 +56,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
 
     // 控制流语句
     void build_if_stmt(const std::shared_ptr<ast::IfStmt>& ifs);
+    void build_switch_stmt(const std::shared_ptr<ast::SwitchStmt>& ss);
     void build_while_stmt(const std::shared_ptr<ast::WhileStmt>& ws);
     void build_for_stmt(const std::shared_ptr<ast::ForStmt>& fs);
     void build_return_stmt(const std::shared_ptr<ast::ReturnStmt>& rs);
@@ -64,6 +74,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
     Value build_id_expr(const std::shared_ptr<ast::IdExpr>& id);
     Value build_literal_expr(const std::shared_ptr<ast::LiteralExpr>& lit);
     Value build_conditional_expr(const std::shared_ptr<ast::ConditionalExpr>& ce);
+    Value build_cast_expr(const std::shared_ptr<ast::CastExpr>& cast);
 
     // 左值处理（用于赋值）
     Value build_lvalue(const std::shared_ptr<ast::Expr>& expr);
@@ -92,6 +103,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
 
     // 二元运算
     Value build_binary(BinaryOp op, Value lhs, Value rhs);
+    Value build_cast(CastOp op, Value value, Type targetTy);
 
     // 控制流
     void build_br(BasicBlock target);

@@ -377,6 +377,26 @@ struct Binary {
 };
 
 ///
+/// Raw cast operator.
+///
+enum class CastOp : uint32_t {
+    /// Signed integer to floating point.
+    SITOFP,
+    /// Floating point to signed integer.
+    FPTOSI
+};
+
+///
+/// Raw cast operation.
+///
+struct Cast {
+    /// Operator.
+    CastOp op;
+    /// Source value.
+    Value value;
+};
+
+///
 /// Raw conditional branch.
 ///
 struct Branch {
@@ -453,6 +473,8 @@ enum class ValueTag : uint32_t {
     GET_ELEM_PTR,
     /// Binary operation.
     BINARY,
+    /// Cast operation.
+    CAST,
     /// Conditional branch.
     BRANCH,
     /// Unconditional jump.
@@ -478,6 +500,7 @@ struct ValueKind {
         GetPtr,
         GetElemPtr,
         Binary,
+        Cast,
         Branch,
         Jump,
         Call,

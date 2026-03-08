@@ -182,6 +182,14 @@ class IRTextDumper {
         return "add";
     }
 
+    std::string cast_op_to_string(CastOp op) {
+        switch (op) {
+            case CastOp::SITOFP: return "sitofp";
+            case CastOp::FPTOSI: return "fptosi";
+        }
+        return "sitofp";
+    }
+
     Type pointee_type(Type ptrTy) {
         if (!ptrTy || ptrTy->tag != TypeTag::POINTER) return nullptr;
         auto ptr = std::get<std::shared_ptr<TypeKind::pointer>>(ptrTy->data);
@@ -197,6 +205,7 @@ class IRTextDumper {
             case ValueTag::GET_PTR:
             case ValueTag::GET_ELEM_PTR:
             case ValueTag::BINARY:
+            case ValueTag::CAST:
                 return true;
             case ValueTag::CALL:
                 return true;
@@ -299,6 +308,12 @@ class IRTextDumper {
                 out_ << binary_op_to_string(binary.op) << " "
                      << inline_value(binary.lhs) << ", "
                      << inline_value(binary.rhs);
+                break;
+            }
+            case ValueTag::CAST: {
+                const auto& cast = std::get<Cast>(inst->kind.data);
+                out_ << cast_op_to_string(cast.op) << " "
+                     << inline_value(cast.value);
                 break;
             }
             case ValueTag::BRANCH: {
