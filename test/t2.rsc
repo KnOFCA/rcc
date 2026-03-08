@@ -1,2 +1,4 @@
-int a;
-int b = ~a;
+int main()
+{
+    int arr[3][4];
+}

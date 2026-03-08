@@ -207,6 +207,7 @@ Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
     funcData->ty = funcType;
     currentFunc_ = funcData;
     bbNameCounters_.clear();
+    labelBBs_.clear();
     
     // 提取函数名
     if (fdef->declarator && fdef->declarator->direct) {
@@ -362,6 +363,19 @@ void IRBuilder::build_stmt(const std::shared_ptr<ast::Stmt>& stmt) {
         fake->body = dws->body;
         build_while_stmt(fake);
     } else if (auto ls = std::dynamic_pointer_cast<LabelStmt>(stmt)) {
+        BasicBlock labelBB = nullptr;
+        auto it = labelBBs_.find(ls->label);
+        if (it == labelBBs_.end()) {
+            labelBB = create_basic_block("label." + ls->label);
+            labelBBs_.emplace(ls->label, labelBB);
+        } else {
+            labelBB = it->second;
+        }
+
+        if (!current_block_terminated()) {
+            build_br(labelBB);
+        }
+        set_insert_point(labelBB);
         build_stmt(ls->stmt);
     } else if (auto cs = std::dynamic_pointer_cast<CaseStmt>(stmt)) {
         BasicBlock caseBB = nullptr;
@@ -393,8 +407,16 @@ void IRBuilder::build_stmt(const std::shared_ptr<ast::Stmt>& stmt) {
             set_insert_point(defaultBB);
         }
         build_stmt(ds->stmt);
-    } else if (std::dynamic_pointer_cast<GotoStmt>(stmt)) {
-        // TODO: 支持 goto/label 跳转
+    } else if (auto gs = std::dynamic_pointer_cast<GotoStmt>(stmt)) {
+        BasicBlock targetBB = nullptr;
+        auto it = labelBBs_.find(gs->label);
+        if (it == labelBBs_.end()) {
+            targetBB = create_basic_block("label." + gs->label);
+            labelBBs_.emplace(gs->label, targetBB);
+        } else {
+            targetBB = it->second;
+        }
+        build_br(targetBB);
     } else if (std::dynamic_pointer_cast<BreakStmt>(stmt)) {
         build_break_stmt();
     } else if (std::dynamic_pointer_cast<ContinueStmt>(stmt)) {
@@ -473,37 +495,48 @@ void IRBuilder::build_switch_stmt(const std::shared_ptr<SwitchStmt>& ss) {
     std::vector<std::shared_ptr<DefaultStmt>> defaults;
     collect_switch_labels(ss->stmt, cases, defaults);
 
+    std::vector<BasicBlock> dispatchBBs;
+    const std::size_t dispatchCount = std::max<std::size_t>(1, cases.size());
+    dispatchBBs.reserve(dispatchCount);
+    for (std::size_t i = 0; i < dispatchCount; ++i) {
+        dispatchBBs.push_back(create_basic_block("switch.dispatch"));
+    }
+
+    std::vector<BasicBlock> caseBBs;
+    caseBBs.reserve(cases.size());
+    for (std::size_t i = 0; i < cases.size(); ++i) {
+        caseBBs.push_back(create_basic_block("switch.case"));
+    }
+
+    BasicBlock defaultBB = !defaults.empty() ? create_basic_block("switch.default") : nullptr;
+    BasicBlock bodyBB = create_basic_block("switch.body");
     BasicBlock endBB = create_basic_block("switch.end");
-    BasicBlock defaultTarget = !defaults.empty() ? create_basic_block("switch.default") : endBB;
+    BasicBlock defaultTarget = defaultBB ? defaultBB : endBB;
 
     SwitchContext ctx;
     ctx.endBB = endBB;
-    if (!defaults.empty()) {
-        ctx.defaultBBs.emplace(defaults.front().get(), defaultTarget);
+    if (defaultBB) {
+        ctx.defaultBBs.emplace(defaults.front().get(), defaultBB);
     }
     for (std::size_t i = 0; i < cases.size(); ++i) {
-        ctx.caseBBs.emplace(cases[i].get(), create_basic_block("switch.case"));
+        ctx.caseBBs.emplace(cases[i].get(), caseBBs[i]);
     }
 
-    BasicBlock dispatchBB = create_basic_block("switch.dispatch");
     if (!current_block_terminated()) {
-        build_br(dispatchBB);
+        build_br(dispatchBBs.front());
     }
 
-    set_insert_point(dispatchBB);
+    // build dispatch code
+    set_insert_point(dispatchBBs.front());
     if (cases.empty()) {
-        if (defaultTarget) {
-            build_br(defaultTarget);
-        }
+        build_br(defaultTarget);
     } else {
         for (std::size_t i = 0; i < cases.size(); ++i) {
             Value caseVal = build_expr(std::dynamic_pointer_cast<Expr>(cases[i]->expr));
             if (!caseVal) continue;
             Value matched = build_binary(BinaryOp::EQ, cond, caseVal);
-            BasicBlock nextDispatch = (i + 1 < cases.size())
-                ? create_basic_block("switch.dispatch")
-                : defaultTarget;
-            build_cond_br(matched, ctx.caseBBs[cases[i].get()], nextDispatch);
+            BasicBlock nextDispatch = (i + 1 < cases.size()) ? dispatchBBs[i + 1] : defaultTarget;
+            build_cond_br(matched, caseBBs[i], nextDispatch);
             if (i + 1 < cases.size()) {
                 set_insert_point(nextDispatch);
             }
@@ -514,7 +547,9 @@ void IRBuilder::build_switch_stmt(const std::shared_ptr<SwitchStmt>& ss) {
     switchStack_.push_back(std::move(ctx));
 
     // Unlabeled statements before first case/default are unreachable in normal flow.
-    set_insert_point(create_basic_block("switch.body"));
+    set_insert_point(bodyBB);
+
+    // build case
     build_stmt(ss->stmt);
 
     if (!current_block_terminated()) {

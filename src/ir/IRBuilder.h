@@ -26,6 +26,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
     std::vector<BasicBlock> breakStack_;
     std::vector<BasicBlock> continueStack_;
     std::vector<SwitchContext> switchStack_;
+    std::unordered_map<std::string, BasicBlock> labelBBs_;
     std::unordered_map<std::string, std::size_t> bbNameCounters_;
     long tempCounter_ = 0;
     
