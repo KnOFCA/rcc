@@ -34,6 +34,66 @@ std::string extract_direct_decl_name(
     return "";
 }
 
+int32_t parse_char_literal_value(const std::string& raw) {
+    if (raw.size() < 2 || raw.front() != '\'' || raw.back() != '\'') {
+        return 0;
+    }
+
+    const std::string body = raw.substr(1, raw.size() - 2);
+    if (body.empty()) return 0;
+
+    if (body[0] != '\\') {
+        return static_cast<unsigned char>(body[0]);
+    }
+
+    if (body.size() == 1) return 0;
+
+    const char esc = body[1];
+    switch (esc) {
+        case 'a': return '\a';
+        case 'b': return '\b';
+        case 'f': return '\f';
+        case 'n': return '\n';
+        case 'r': return '\r';
+        case 't': return '\t';
+        case 'v': return '\v';
+        case '\\': return '\\';
+        case '\'': return '\'';
+        case '\"': return '\"';
+        case '?': return '\?';
+        case 'x': {
+            if (body.size() < 3) return 0;
+            int32_t value = 0;
+            for (std::size_t i = 2; i < body.size(); ++i) {
+                const char c = body[i];
+                int digit = -1;
+                if (c >= '0' && c <= '9') digit = c - '0';
+                else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+                else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+                else break;
+                value = (value << 4) | digit;
+            }
+            return value;
+        }
+        default: {
+            // 八进制转义：最多 3 位
+            if (esc >= '0' && esc <= '7') {
+                int32_t value = esc - '0';
+                std::size_t i = 2;
+                std::size_t count = 1;
+                while (i < body.size() && count < 3 &&
+                       body[i] >= '0' && body[i] <= '7') {
+                    value = (value << 3) | (body[i] - '0');
+                    ++i;
+                    ++count;
+                }
+                return value;
+            }
+            return static_cast<unsigned char>(esc);
+        }
+    }
+}
+
 } // namespace
 
 // ============================================================================
@@ -784,6 +844,13 @@ Value IRBuilder::build_literal_expr(const std::shared_ptr<LiteralExpr>& lit) {
             valData->ty->tag = TypeTag::FLOAT;
             break;
         }
+        case LiteralExpr::CHAR: {
+            int32_t val = parse_char_literal_value(lit->value);
+            num.num = Integer32{val};
+            valData->ty = std::make_shared<TypeKind>();
+            valData->ty->tag = TypeTag::INT32;
+            break;
+        }
         default: break;
     }
     
@@ -911,60 +978,84 @@ Type IRBuilder::build_type(const std::shared_ptr<DeclSpec>& specs,
         }
     }
     
-    // 处理声明器（指针、数组、函数）
-    Type result = baseType;
-    
-    if (decl) {
-        // 处理指针
-        auto ptr = decl->pointer;
+    if (!decl) return baseType;
+
+    struct TypeCtor {
+        enum class Kind { Pointer, Array, Function };
+        Kind kind;
+        std::size_t arraySize = 0;
+        std::vector<Type> params;
+    };
+
+    std::vector<TypeCtor> ctors;
+    std::function<void(const std::shared_ptr<Declarator>&)> collect_from_decl;
+    std::function<void(const std::shared_ptr<DirectDeclarator>&)> collect_from_direct;
+
+    collect_from_decl = [&](const std::shared_ptr<Declarator>& d) {
+        if (!d) return;
+        collect_from_direct(d->direct);
+        auto ptr = d->pointer;
         while (ptr) {
-            result = build_pointer_type(result);
+            ctors.push_back(TypeCtor{TypeCtor::Kind::Pointer, 0, {}});
             ptr = ptr->next;
         }
-        
-        std::function<Type(Type, const std::shared_ptr<DirectDeclarator>&)> build_from_direct;
-        build_from_direct = [&](Type base, const std::shared_ptr<DirectDeclarator>& direct) -> Type {
-            if (!direct) return base;
+    };
 
-            if (auto ddArray = std::dynamic_pointer_cast<DDArray>(direct)) {
-                std::size_t size = 0;
-                if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(ddArray->size)) {
-                    if (lit->type == LiteralExpr::INTEGER) {
-                        size = std::stoul(lit->value);
-                    }
+    collect_from_direct = [&](const std::shared_ptr<DirectDeclarator>& direct) {
+        if (!direct) return;
+
+        if (auto ddArray = std::dynamic_pointer_cast<DDArray>(direct)) {
+            collect_from_direct(ddArray->base);
+            std::size_t size = 0;
+            if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(ddArray->size)) {
+                if (lit->type == LiteralExpr::INTEGER) {
+                    size = std::stoul(lit->value);
                 }
-                Type elemTy = build_from_direct(base, ddArray->base);
-                return build_array_type(elemTy, size);
             }
+            ctors.push_back(TypeCtor{TypeCtor::Kind::Array, size, {}});
+            return;
+        }
 
-            if (auto ddCall = std::dynamic_pointer_cast<DDCall>(direct)) {
-                std::vector<Type> params;
-                params.reserve(ddCall->params.size());
-                for (const auto& p : ddCall->params) {
-                    auto pDecl = std::dynamic_pointer_cast<Declarator>(p->declarator);
-                    Type pTy = build_type(p->specs, pDecl);
-                    params.push_back(pTy);
-                }
-                Type retTy = build_from_direct(
-                    base, std::dynamic_pointer_cast<DirectDeclarator>(ddCall->base));
-                return build_function_type(retTy, params);
+        if (auto ddCall = std::dynamic_pointer_cast<DDCall>(direct)) {
+            collect_from_direct(std::dynamic_pointer_cast<DirectDeclarator>(ddCall->base));
+            std::vector<Type> params;
+            params.reserve(ddCall->params.size());
+            for (const auto& p : ddCall->params) {
+                auto pDecl = std::dynamic_pointer_cast<Declarator>(p->declarator);
+                params.push_back(build_type(p->specs, pDecl));
             }
+            TypeCtor ctor{TypeCtor::Kind::Function, 0, {}};
+            ctor.params = std::move(params);
+            ctors.push_back(std::move(ctor));
+            return;
+        }
 
-            if (auto ddParen = std::dynamic_pointer_cast<DDParen>(direct)) {
-                auto innerDecl = std::dynamic_pointer_cast<Declarator>(ddParen->inner);
-                return innerDecl ? build_type(specs, innerDecl) : base;
-            }
+        if (auto ddParen = std::dynamic_pointer_cast<DDParen>(direct)) {
+            auto innerDecl = std::dynamic_pointer_cast<Declarator>(ddParen->inner);
+            collect_from_decl(innerDecl);
+            return;
+        }
+    };
 
-            return base;
-        };
+    collect_from_decl(decl);
 
-        result = build_from_direct(result, decl->direct);
+    Type result = baseType;
+    for (auto it = ctors.rbegin(); it != ctors.rend(); ++it) {
+        switch (it->kind) {
+            case TypeCtor::Kind::Pointer:
+                result = build_pointer_type(result);
+                break;
+            case TypeCtor::Kind::Array:
+                result = build_array_type(result, it->arraySize);
+                break;
+            case TypeCtor::Kind::Function:
+                result = build_function_type(result, it->params);
+                break;
+        }
     }
-    
     return result;
 }
 
-// TODO: variant type deal
 Type IRBuilder::build_pointer_type(Type base) {
     auto ty = std::make_shared<TypeKind>();
     ty->tag = TypeTag::POINTER;

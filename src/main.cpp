@@ -60,6 +60,8 @@ int main(int argc, const char **argv) {
   rcc::ir::IRBuilder irbuilder;
   irbuilder.build_from_AST(tu);
 
+  irbuilder.dump_to_stdout();
+
   if (file.is_open()) {
       file.close();
   }
