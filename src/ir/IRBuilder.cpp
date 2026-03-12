@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <functional>
 #include <algorithm>
+#include <cctype>
 
 namespace rcc::ir {
 
@@ -118,6 +119,90 @@ Type pointee_type(Type ptrTy) {
     auto ptr = std::get<std::shared_ptr<TypeKind::pointer>>(ptrTy->data);
     if (!ptr) return nullptr;
     return ptr->base;
+}
+
+bool is_char_array_type(Type ty) {
+    if (!ty || ty->tag != TypeTag::ARRAY) return false;
+    auto arr = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
+    return arr && arr->base && arr->base->tag == TypeTag::INT8;
+}
+
+std::vector<int32_t> parse_string_literal_bytes(const std::string& raw) {
+    std::vector<int32_t> bytes;
+    if (raw.size() < 2 || raw.front() != '"' || raw.back() != '"') return bytes;
+
+    const std::string body = raw.substr(1, raw.size() - 2);
+    for (std::size_t i = 0; i < body.size(); ++i) {
+        char c = body[i];
+        if (c != '\\') {
+            bytes.push_back(static_cast<unsigned char>(c));
+            continue;
+        }
+
+        if (i + 1 >= body.size()) {
+            bytes.push_back(0);
+            break;
+        }
+
+        char esc = body[++i];
+        switch (esc) {
+            case 'a': bytes.push_back('\a'); break;
+            case 'b': bytes.push_back('\b'); break;
+            case 'f': bytes.push_back('\f'); break;
+            case 'n': bytes.push_back('\n'); break;
+            case 'r': bytes.push_back('\r'); break;
+            case 't': bytes.push_back('\t'); break;
+            case 'v': bytes.push_back('\v'); break;
+            case '\\': bytes.push_back('\\'); break;
+            case '\'': bytes.push_back('\''); break;
+            case '\"': bytes.push_back('\"'); break;
+            case '?': bytes.push_back('\?'); break;
+            case 'x': {
+                int32_t value = 0;
+                bool hasHex = false;
+                while (i + 1 < body.size() && std::isxdigit(static_cast<unsigned char>(body[i + 1]))) {
+                    const char hx = body[++i];
+                    hasHex = true;
+                    if (hx >= '0' && hx <= '9') value = (value << 4) | (hx - '0');
+                    else if (hx >= 'a' && hx <= 'f') value = (value << 4) | (hx - 'a' + 10);
+                    else value = (value << 4) | (hx - 'A' + 10);
+                }
+                bytes.push_back(hasHex ? value : 0);
+                break;
+            }
+            default: {
+                if (esc >= '0' && esc <= '7') {
+                    int32_t value = esc - '0';
+                    std::size_t count = 1;
+                    while (i + 1 < body.size() && count < 3 &&
+                           body[i + 1] >= '0' && body[i + 1] <= '7') {
+                        value = (value << 3) | (body[++i] - '0');
+                        ++count;
+                    }
+                    bytes.push_back(value);
+                } else {
+                    bytes.push_back(static_cast<unsigned char>(esc));
+                }
+                break;
+            }
+        }
+    }
+    return bytes;
+}
+
+bool extract_string_literal_initializer(
+    const std::shared_ptr<ast::Initializer>& init,
+    std::vector<int32_t>& outBytesWithTerminator) {
+    outBytesWithTerminator.clear();
+    auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(init);
+    if (!exprInit) return false;
+    auto expr = std::dynamic_pointer_cast<Expr>(exprInit->expr);
+    auto lit = std::dynamic_pointer_cast<LiteralExpr>(expr);
+    if (!lit || lit->type != LiteralExpr::STRING) return false;
+
+    outBytesWithTerminator = parse_string_literal_bytes(lit->value);
+    outBytesWithTerminator.push_back(0); // C 字符串存储包含终止符
+    return true;
 }
 
 Value build_zero_scalar(IRBuilder& builder, Type ty) {
@@ -279,6 +364,17 @@ Value IRBuilder::build_global_declaration(const std::shared_ptr<Declaration>& de
         // 构建类型
         Type ty = build_type(decl->specs, initDecl->declarator);
         if (!ty) continue;
+
+        std::vector<int32_t> strInitBytes;
+        bool hasStrInit = is_char_array_type(ty) &&
+                          initDecl->initializer &&
+                          extract_string_literal_initializer(initDecl->initializer, strInitBytes);
+        if (hasStrInit) {
+            auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
+            if (arrTy && arrTy->len == 0) {
+                arrTy->len = strInitBytes.size();
+            }
+        }
         
         // 提取变量名
         auto symName = extract_direct_decl_name(initDecl->declarator->direct);
@@ -302,7 +398,24 @@ Value IRBuilder::build_global_declaration(const std::shared_ptr<Declaration>& de
         
         // 处理初始化
         if (initDecl->initializer) {
-            if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
+            if (hasStrInit) {
+                auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
+                auto aggInit = std::make_shared<ValueData>();
+                aggInit->kind.tag = ValueTag::AGGREGATE;
+                Aggregate agg;
+                agg.elems.kind = SliceItemKind::VALUE;
+
+                std::size_t arrLen = arrTy ? arrTy->len : 0;
+                std::size_t copied = std::min(arrLen, strInitBytes.size());
+                for (std::size_t i = 0; i < copied; ++i) {
+                    agg.elems.buffer.push_back(build_integer_const(strInitBytes[i]));
+                }
+                for (std::size_t i = copied; i < arrLen; ++i) {
+                    agg.elems.buffer.push_back(build_integer_const(0));
+                }
+                aggInit->kind.data = agg;
+                valData->kind.data = GlobalAlloc{aggInit};
+            } else if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
                 valData->kind.data = GlobalAlloc{build_expr(
                     std::dynamic_pointer_cast<Expr>(exprInit->expr))};
             }
@@ -910,6 +1023,17 @@ Value IRBuilder::build_local_declaration(const std::shared_ptr<Declaration>& dec
         Type ty = build_type(decl->specs, initDecl->declarator);
         if (!ty) continue;
 
+        std::vector<int32_t> strInitBytes;
+        bool hasStrInit = is_char_array_type(ty) &&
+                          initDecl->initializer &&
+                          extract_string_literal_initializer(initDecl->initializer, strInitBytes);
+        if (hasStrInit) {
+            auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
+            if (arrTy && arrTy->len == 0) {
+                arrTy->len = strInitBytes.size();
+            }
+        }
+
         // 提取名字
         std::string name = extract_direct_decl_name(initDecl->declarator->direct);
 
@@ -931,7 +1055,32 @@ Value IRBuilder::build_local_declaration(const std::shared_ptr<Declaration>& dec
 
         // 处理初始化
         if (initDecl->initializer) {
-            if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
+            if (hasStrInit) {
+                auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
+                if (arrTy && arrTy->base) {
+                    std::size_t copied = std::min(arrTy->len, strInitBytes.size());
+                    for (std::size_t i = 0; i < copied; ++i) {
+                        auto idx = build_integer_const(static_cast<int32_t>(i));
+                        auto elemAddr = std::make_shared<ValueData>();
+                        elemAddr->name = "%" + std::to_string(tempCounter_++);
+                        elemAddr->ty = build_pointer_type(arrTy->base);
+                        elemAddr->kind.tag = ValueTag::GET_ELEM_PTR;
+                        elemAddr->kind.data = GetElemPtr{addr, idx};
+                        if (currentBB_) currentBB_->insts.buffer.push_back(elemAddr);
+                        build_store(build_integer_const(strInitBytes[i]), elemAddr);
+                    }
+                    for (std::size_t i = copied; i < arrTy->len; ++i) {
+                        auto idx = build_integer_const(static_cast<int32_t>(i));
+                        auto elemAddr = std::make_shared<ValueData>();
+                        elemAddr->name = "%" + std::to_string(tempCounter_++);
+                        elemAddr->ty = build_pointer_type(arrTy->base);
+                        elemAddr->kind.tag = ValueTag::GET_ELEM_PTR;
+                        elemAddr->kind.data = GetElemPtr{addr, idx};
+                        if (currentBB_) currentBB_->insts.buffer.push_back(elemAddr);
+                        build_store(build_integer_const(0), elemAddr);
+                    }
+                }
+            } else if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
                 Value initVal = build_expr(std::dynamic_pointer_cast<Expr>(exprInit->expr));
                 if (initVal) {
                     build_store(initVal, addr);
@@ -1258,7 +1407,11 @@ Value IRBuilder::build_literal_expr(const std::shared_ptr<LiteralExpr>& lit) {
             valData->ty->tag = TypeTag::INT32;
             break;
         }
-        default: break;
+        default:
+            num.num = Integer32{0};
+            valData->ty = std::make_shared<TypeKind>();
+            valData->ty->tag = TypeTag::INT32;
+            break;
     }
     
     valData->kind.data = num;

@@ -1,4 +1,5 @@
 #include "IRBuilder.h"
+#include "IRVisitor.h"
 
 #include <fstream>
 #include <iostream>
@@ -11,32 +12,218 @@ namespace rcc::ir {
 
 namespace {
 
-class IRTextDumper {
+class IRTextDumper : public IRVisitor<IRTextDumper> {
   public:
     explicit IRTextDumper(std::ostream& out) : out_(out) {}
 
-    void dump_program(const Program& program) {
-        for (const auto& item : program.values.buffer) {
-            if (std::holds_alternative<Value>(item)) {
-                dump_global(std::get<Value>(item));
-            }
-        }
+    void dump_program(const std::shared_ptr<Program>& program) {
+        visit_program(program);
+    }
 
-        if (!program.values.buffer.empty() && !program.funcs.buffer.empty()) {
-            out_ << '\n';
+    bool TraverseProgram(const std::shared_ptr<Program>& program) {
+        if (!program) return true;
+
+        bool hasGlobal = false;
+        if (!detail::visit_slice_items(program->values, SliceItemKind::VALUE,
+                                       [&](const Slice::ItemsPtr& item) {
+                                           Value value = std::get<Value>(item);
+                                           if (!value || value->kind.tag != ValueTag::GLOBAL_ALLOC) {
+                                               return true;
+                                           }
+                                           hasGlobal = true;
+                                           return visit_value(value);
+                                       })) {
+            return false;
         }
 
         bool firstFunc = true;
-        for (const auto& item : program.funcs.buffer) {
-            if (!std::holds_alternative<Function>(item)) {
-                continue;
-            }
-            if (!firstFunc) {
-                out_ << '\n';
-            }
-            firstFunc = false;
-            dump_function(std::get<Function>(item));
+        return detail::visit_slice_items(program->funcs, SliceItemKind::FUNCTION,
+                                         [&](const Slice::ItemsPtr& item) {
+                                             Function func = std::get<Function>(item);
+                                             if (!func) return true;
+                                             if (hasGlobal || !firstFunc) {
+                                                 out_ << '\n';
+                                             }
+                                             firstFunc = false;
+                                             return visit_function(func);
+                                         });
+    }
+
+    bool TraverseFunction(Function func) {
+        if (!func) return true;
+
+        out_ << "fun " << function_name(func) << "(): " << function_return_type(func) << " {\n";
+
+        bool ok = detail::visit_slice_items(func->bbs, SliceItemKind::BASIC_BLOCK,
+                                            [&](const Slice::ItemsPtr& item) {
+                                                return visit_basic_block(std::get<BasicBlock>(item));
+                                            });
+        if (!ok) return false;
+
+        out_ << "}";
+        return true;
+    }
+
+    bool TraverseBasicBlock(BasicBlock bb) {
+        if (!bb) return true;
+
+        out_ << block_name(bb) << ":\n";
+        return detail::visit_slice_items(bb->insts, SliceItemKind::VALUE,
+                                         [&](const Slice::ItemsPtr& item) {
+                                             return visit_value(std::get<Value>(item));
+                                         });
+    }
+
+    bool TraverseValue(Value value) {
+        (void)value;
+        return true;
+    }
+
+    bool VisitGlobalAlloc(Value global) {
+        if (!global || global->kind.tag != ValueTag::GLOBAL_ALLOC) return true;
+
+        const auto& galloc = std::get<GlobalAlloc>(global->kind.data);
+        out_ << "global " << value_name(global) << " = alloc "
+             << type_to_string(pointee_type(global->ty)) << ", "
+             << inline_value(galloc.init) << "\n";
+        return true;
+    }
+
+    bool VisitAlloc(Value inst) {
+        begin_inst(inst);
+        out_ << "alloc " << type_to_string(pointee_type(inst ? inst->ty : nullptr)) << "\n";
+        return true;
+    }
+
+    bool VisitLoad(Value inst) {
+        begin_inst(inst);
+        const auto& load = std::get<Load>(inst->kind.data);
+        out_ << "load " << inline_value(load.src) << "\n";
+        return true;
+    }
+
+    bool VisitStore(Value inst) {
+        begin_inst(inst);
+        const auto& store = std::get<Store>(inst->kind.data);
+        out_ << "store " << inline_value(store.value)
+             << ", " << inline_value(store.dest) << "\n";
+        return true;
+    }
+
+    bool VisitGetPtr(Value inst) {
+        begin_inst(inst);
+        const auto& gp = std::get<GetPtr>(inst->kind.data);
+        out_ << "getptr " << inline_value(gp.src)
+             << ", " << inline_value(gp.index) << "\n";
+        return true;
+    }
+
+    bool VisitGetElemPtr(Value inst) {
+        begin_inst(inst);
+        const auto& gep = std::get<GetElemPtr>(inst->kind.data);
+        out_ << "getelemptr " << inline_value(gep.src)
+             << ", " << inline_value(gep.index) << "\n";
+        return true;
+    }
+
+    bool VisitBinary(Value inst) {
+        begin_inst(inst);
+        const auto& binary = std::get<Binary>(inst->kind.data);
+        out_ << binary_op_to_string(binary.op) << " "
+             << inline_value(binary.lhs) << ", "
+             << inline_value(binary.rhs) << "\n";
+        return true;
+    }
+
+    bool VisitCast(Value inst) {
+        begin_inst(inst);
+        const auto& cast = std::get<Cast>(inst->kind.data);
+        out_ << cast_op_to_string(cast.op) << " "
+             << inline_value(cast.value) << "\n";
+        return true;
+    }
+
+    bool VisitBranch(Value inst) {
+        begin_inst(inst);
+        const auto& br = std::get<Branch>(inst->kind.data);
+        out_ << "br " << inline_value(br.cond)
+             << ", " << block_name(br.true_bb)
+             << ", " << block_name(br.false_bb) << "\n";
+        return true;
+    }
+
+    bool VisitJump(Value inst) {
+        begin_inst(inst);
+        const auto& jump = std::get<Jump>(inst->kind.data);
+        out_ << "jump " << block_name(jump.target) << "\n";
+        return true;
+    }
+
+    bool VisitCall(Value inst) {
+        begin_inst(inst);
+        const auto& call = std::get<Call>(inst->kind.data);
+        out_ << "call " << function_name(call.callee) << "(";
+
+        bool first = true;
+        for (const auto& item : call.args.buffer) {
+            if (!std::holds_alternative<Value>(item)) continue;
+            if (!first) out_ << ", ";
+            first = false;
+            out_ << inline_value(std::get<Value>(item));
         }
+        out_ << ")\n";
+        return true;
+    }
+
+    bool VisitReturn(Value inst) {
+        begin_inst(inst);
+        const auto& ret = std::get<FuncReturn>(inst->kind.data);
+        if (ret.value) {
+            out_ << "ret " << inline_value(ret.value) << "\n";
+        } else {
+            out_ << "ret\n";
+        }
+        return true;
+    }
+
+    bool VisitNumber(Value inst) {
+        begin_inst(inst);
+        out_ << inline_value(inst) << "\n";
+        return true;
+    }
+
+    bool VisitZeroInit(Value inst) {
+        begin_inst(inst);
+        (void)inst;
+        out_ << "zeroinit\n";
+        return true;
+    }
+
+    bool VisitUndef(Value inst) {
+        begin_inst(inst);
+        (void)inst;
+        out_ << "undef\n";
+        return true;
+    }
+
+    bool VisitAggregate(Value inst) {
+        begin_inst(inst);
+        out_ << aggregate_to_string(std::get<Aggregate>(inst->kind.data)) << "\n";
+        return true;
+    }
+
+    bool VisitFuncArgRef(Value inst) {
+        begin_inst(inst);
+        const auto& ref = std::get<FuncArgRef>(inst->kind.data);
+        out_ << "%arg" << ref.index << "\n";
+        return true;
+    }
+
+    bool VisitBlockArgRef(Value inst) {
+        begin_inst(inst);
+        const auto& ref = std::get<BlockArgRef>(inst->kind.data);
+        out_ << "%barg" << ref.index << "\n";
+        return true;
     }
 
   private:
@@ -45,6 +232,29 @@ class IRTextDumper {
     std::unordered_map<const BasicBlockData*, std::string> bbNames_;
     std::size_t valueCounter_ = 0;
     std::size_t bbCounter_ = 0;
+
+    void begin_inst(Value inst) {
+        out_ << "  ";
+        if (has_result(inst)) {
+            out_ << value_name(inst) << " = ";
+        }
+    }
+
+    std::string function_name(Function func) const {
+        if (func && func->name && !func->name->empty()) {
+            return *func->name;
+        }
+        return "@anon_fn";
+    }
+
+    std::string function_return_type(Function func) {
+        if (!func || !func->ty || func->ty->tag != TypeTag::FUNCTION) {
+            return "unit";
+        }
+        auto fnType = std::get<std::shared_ptr<TypeKind::function>>(func->ty->data);
+        if (!fnType) return "unit";
+        return type_to_string(fnType->ret);
+    }
 
     std::string type_to_string(Type ty) {
         if (!ty) return "unit";
@@ -87,7 +297,7 @@ class IRTextDumper {
         return "unit";
     }
 
-    std::string number_to_string(const Number& num) {
+    std::string number_to_string(const Number& num) const {
         std::ostringstream oss;
         if (std::holds_alternative<Integer8>(num.num)) {
             oss << static_cast<int>(std::get<Integer8>(num.num).value);
@@ -129,22 +339,6 @@ class IRTextDumper {
         return generated;
     }
 
-    std::string inline_value(Value value) {
-        if (!value) return "undef";
-        switch (value->kind.tag) {
-            case ValueTag::NUMBER:
-                return number_to_string(std::get<Number>(value->kind.data));
-            case ValueTag::ZERO_INIT:
-                return "zeroinit";
-            case ValueTag::UNDEF:
-                return "undef";
-            case ValueTag::AGGREGATE:
-                return aggregate_to_string(std::get<Aggregate>(value->kind.data));
-            default:
-                return value_name(value);
-        }
-    }
-
     std::string aggregate_to_string(const Aggregate& agg) {
         std::ostringstream oss;
         oss << "{";
@@ -159,7 +353,31 @@ class IRTextDumper {
         return oss.str();
     }
 
-    std::string binary_op_to_string(BinaryOp op) {
+    std::string inline_value(Value value) {
+        if (!value) return "undef";
+        switch (value->kind.tag) {
+            case ValueTag::NUMBER:
+                return number_to_string(std::get<Number>(value->kind.data));
+            case ValueTag::ZERO_INIT:
+                return "zeroinit";
+            case ValueTag::UNDEF:
+                return "undef";
+            case ValueTag::AGGREGATE:
+                return aggregate_to_string(std::get<Aggregate>(value->kind.data));
+            case ValueTag::FUNC_ARG_REF: {
+                const auto& ref = std::get<FuncArgRef>(value->kind.data);
+                return "%arg" + std::to_string(ref.index);
+            }
+            case ValueTag::BLOCK_ARG_REF: {
+                const auto& ref = std::get<BlockArgRef>(value->kind.data);
+                return "%barg" + std::to_string(ref.index);
+            }
+            default:
+                return value_name(value);
+        }
+    }
+
+    std::string binary_op_to_string(BinaryOp op) const {
         switch (op) {
             case BinaryOp::NOT_EQ: return "ne";
             case BinaryOp::EQ: return "eq";
@@ -182,7 +400,7 @@ class IRTextDumper {
         return "add";
     }
 
-    std::string cast_op_to_string(CastOp op) {
+    std::string cast_op_to_string(CastOp op) const {
         switch (op) {
             case CastOp::SITOFP: return "sitofp";
             case CastOp::FPTOSI: return "fptosi";
@@ -190,14 +408,14 @@ class IRTextDumper {
         return "sitofp";
     }
 
-    Type pointee_type(Type ptrTy) {
+    Type pointee_type(Type ptrTy) const {
         if (!ptrTy || ptrTy->tag != TypeTag::POINTER) return nullptr;
         auto ptr = std::get<std::shared_ptr<TypeKind::pointer>>(ptrTy->data);
         if (!ptr) return nullptr;
         return ptr->base;
     }
 
-    bool has_result(Value inst) {
+    bool has_result(Value inst) const {
         if (!inst) return false;
         switch (inst->kind.tag) {
             case ValueTag::ALLOC:
@@ -206,186 +424,11 @@ class IRTextDumper {
             case ValueTag::GET_ELEM_PTR:
             case ValueTag::BINARY:
             case ValueTag::CAST:
-                return true;
             case ValueTag::CALL:
                 return true;
             default:
                 return false;
         }
-    }
-
-    void dump_global(Value global) {
-        if (!global || global->kind.tag != ValueTag::GLOBAL_ALLOC) {
-            return;
-        }
-
-        const auto& galloc = std::get<GlobalAlloc>(global->kind.data);
-        std::string name = (global->name && !global->name->empty())
-                               ? *global->name
-                               : value_name(global);
-        Type baseTy = pointee_type(global->ty);
-
-        out_ << "global " << name << " = alloc "
-             << type_to_string(baseTy) << ", "
-             << inline_value(galloc.init) << "\n";
-    }
-
-    void dump_function(Function func) {
-        if (!func) return;
-
-        Type retTy = nullptr;
-        if (func->ty && func->ty->tag == TypeTag::FUNCTION) {
-            auto fnType = std::get<std::shared_ptr<TypeKind::function>>(func->ty->data);
-            if (fnType) retTy = fnType->ret;
-        }
-
-        std::string fname = (func->name && !func->name->empty())
-                                ? *func->name
-                                : "@anon_fn";
-
-        out_ << "fun " << fname << "(): " << type_to_string(retTy) << " {\n";
-
-        for (const auto& item : func->bbs.buffer) {
-            if (!std::holds_alternative<BasicBlock>(item)) {
-                continue;
-            }
-            dump_block(std::get<BasicBlock>(item));
-        }
-
-        out_ << "}";
-    }
-
-    void dump_block(BasicBlock bb) {
-        if (!bb) return;
-
-        out_ << block_name(bb) << ":\n";
-        for (const auto& instItem : bb->insts.buffer) {
-            if (!std::holds_alternative<Value>(instItem)) {
-                continue;
-            }
-            dump_inst(std::get<Value>(instItem));
-        }
-    }
-
-    void dump_inst(Value inst) {
-        if (!inst) return;
-
-        out_ << "  ";
-        if (has_result(inst)) {
-            out_ << value_name(inst) << " = ";
-        }
-
-        switch (inst->kind.tag) {
-            case ValueTag::ALLOC: {
-                out_ << "alloc " << type_to_string(pointee_type(inst->ty));
-                break;
-            }
-            case ValueTag::LOAD: {
-                const auto& load = std::get<Load>(inst->kind.data);
-                out_ << "load " << inline_value(load.src);
-                break;
-            }
-            case ValueTag::STORE: {
-                const auto& store = std::get<Store>(inst->kind.data);
-                out_ << "store " << inline_value(store.value)
-                     << ", " << inline_value(store.dest);
-                break;
-            }
-            case ValueTag::GET_PTR: {
-                const auto& gp = std::get<GetPtr>(inst->kind.data);
-                out_ << "getptr " << inline_value(gp.src)
-                     << ", " << inline_value(gp.index);
-                break;
-            }
-            case ValueTag::GET_ELEM_PTR: {
-                const auto& gep = std::get<GetElemPtr>(inst->kind.data);
-                out_ << "getelemptr " << inline_value(gep.src)
-                     << ", " << inline_value(gep.index);
-                break;
-            }
-            case ValueTag::BINARY: {
-                const auto& binary = std::get<Binary>(inst->kind.data);
-                out_ << binary_op_to_string(binary.op) << " "
-                     << inline_value(binary.lhs) << ", "
-                     << inline_value(binary.rhs);
-                break;
-            }
-            case ValueTag::CAST: {
-                const auto& cast = std::get<Cast>(inst->kind.data);
-                out_ << cast_op_to_string(cast.op) << " "
-                     << inline_value(cast.value);
-                break;
-            }
-            case ValueTag::BRANCH: {
-                const auto& br = std::get<Branch>(inst->kind.data);
-                out_ << "br " << inline_value(br.cond)
-                     << ", " << block_name(br.true_bb)
-                     << ", " << block_name(br.false_bb);
-                break;
-            }
-            case ValueTag::JUMP: {
-                const auto& jump = std::get<Jump>(inst->kind.data);
-                out_ << "jump " << block_name(jump.target);
-                break;
-            }
-            case ValueTag::CALL: {
-                const auto& call = std::get<Call>(inst->kind.data);
-                std::string callee = (call.callee && call.callee->name && !call.callee->name->empty())
-                                         ? *call.callee->name
-                                         : "@anon_fn";
-                out_ << "call " << callee << "(";
-                bool first = true;
-                for (const auto& arg : call.args.buffer) {
-                    if (!std::holds_alternative<Value>(arg)) continue;
-                    if (!first) out_ << ", ";
-                    first = false;
-                    out_ << inline_value(std::get<Value>(arg));
-                }
-                out_ << ")";
-                break;
-            }
-            case ValueTag::RETURN: {
-                const auto& ret = std::get<FuncReturn>(inst->kind.data);
-                if (ret.value) {
-                    out_ << "ret " << inline_value(ret.value);
-                } else {
-                    out_ << "ret";
-                }
-                break;
-            }
-            case ValueTag::NUMBER: {
-                out_ << inline_value(inst);
-                break;
-            }
-            case ValueTag::ZERO_INIT: {
-                out_ << "zeroinit";
-                break;
-            }
-            case ValueTag::UNDEF: {
-                out_ << "undef";
-                break;
-            }
-            case ValueTag::AGGREGATE: {
-                out_ << aggregate_to_string(std::get<Aggregate>(inst->kind.data));
-                break;
-            }
-            case ValueTag::FUNC_ARG_REF: {
-                const auto& ref = std::get<FuncArgRef>(inst->kind.data);
-                out_ << "%arg" << ref.index;
-                break;
-            }
-            case ValueTag::BLOCK_ARG_REF: {
-                const auto& ref = std::get<BlockArgRef>(inst->kind.data);
-                out_ << "%barg" << ref.index;
-                break;
-            }
-            case ValueTag::GLOBAL_ALLOC: {
-                out_ << "<global_alloc>";
-                break;
-            }
-        }
-
-        out_ << "\n";
     }
 };
 
@@ -397,7 +440,7 @@ ErrorCode IRBuilder::dump_to_stdout() {
     }
 
     IRTextDumper dumper(std::cout);
-    dumper.dump_program(*program);
+    dumper.dump_program(program);
 
     if (!std::cout.good()) {
         return ErrorCode::IO_ERROR;
@@ -416,7 +459,7 @@ ErrorCode IRBuilder::dump_to_file(const std::filesystem::path& path) {
     }
 
     IRTextDumper dumper(ofs);
-    dumper.dump_program(*program);
+    dumper.dump_program(program);
 
     ofs.flush();
     if (!ofs.good()) {

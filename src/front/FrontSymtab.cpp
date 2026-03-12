@@ -1,5 +1,6 @@
 #include "FrontSymtab.h"
 #include <cassert>
+#include <stdexcept>
 
 namespace rcc::symtab {
 
@@ -160,6 +161,7 @@ std::size_t TypeDesc::getSize() const {
         case TypeCategory::Struct:
         case TypeCategory::Union:
         case TypeCategory::Enum:
+            // TODO:
             // incomplete; size to be filled during semantic analysis
             return 0;
     }
@@ -229,6 +231,7 @@ std::shared_ptr<Symbol> Scope::lookup(const std::string &name) {
     auto sym = lookupLocal(name);
     if (sym) return sym;
     if (parent_) return parent_->lookup(name);
+    throw std::runtime_error("ERROR: can't find name " + name);
     return nullptr;
 }
 
@@ -236,6 +239,7 @@ std::shared_ptr<TagSymbol> Scope::lookupTag(const std::string &name) {
     auto sym = lookupTagLocal(name);
     if (sym) return sym;
     if (parent_) return parent_->lookupTag(name);
+    throw std::runtime_error("ERROR: can't find tag " + name);
     return nullptr;
 }
 
