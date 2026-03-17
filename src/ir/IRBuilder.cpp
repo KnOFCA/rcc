@@ -36,6 +36,23 @@ std::string extract_direct_decl_name(
     return "";
 }
 
+std::vector<std::shared_ptr<ast::ParameterDecl>> extract_function_params(
+    const std::shared_ptr<ast::DirectDeclarator>& direct) {
+    if (!direct) return {};
+    if (auto call = std::dynamic_pointer_cast<ast::DDCall>(direct)) {
+        return call->params;
+    }
+    if (auto arr = std::dynamic_pointer_cast<ast::DDArray>(direct)) {
+        return extract_function_params(arr->base);
+    }
+    if (auto paren = std::dynamic_pointer_cast<ast::DDParen>(direct)) {
+        auto innerDecl = std::dynamic_pointer_cast<ast::Declarator>(paren->inner);
+        if (!innerDecl) return {};
+        return extract_function_params(innerDecl->direct);
+    }
+    return {};
+}
+
 int32_t parse_char_literal_value(const std::string& raw) {
     if (raw.size() < 2 || raw.front() != '\'' || raw.back() != '\'') {
         return 0;
@@ -291,6 +308,14 @@ ErrorCode IRBuilder::build_from_AST(std::shared_ptr<TranslationUnit> node) {
     return ErrorCode::SUCCESS;
 }
 
+void IRBuilder::delete_program() {
+    program.reset();
+}
+
+std::shared_ptr<Program> IRBuilder::get_program() const {
+    return program;
+}
+
 // ============================================================================
 // 函数定义
 // ============================================================================
@@ -338,6 +363,42 @@ Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
     // 创建入口基本块
     BasicBlock entry = create_basic_block("entry");
     set_insert_point(entry);
+
+    funcData->params.kind = SliceItemKind::VALUE;
+    auto params = fdef->declarator ? extract_function_params(fdef->declarator->direct)
+                                   : std::vector<std::shared_ptr<ParameterDecl>>{};
+    for (std::size_t index = 0; index < params.size(); ++index) {
+        const auto& param = params[index];
+        if (!param || !param->specs) continue;
+
+        auto paramDecl = std::dynamic_pointer_cast<Declarator>(param->declarator);
+        Type paramTy = build_type(param->specs, paramDecl);
+        if (!paramTy) continue;
+
+        auto argRef = std::make_shared<ValueData>();
+        argRef->ty = paramTy;
+        argRef->name = "%arg" + std::to_string(index);
+        argRef->kind.tag = ValueTag::FUNC_ARG_REF;
+        argRef->kind.data = FuncArgRef{index};
+        funcData->params.buffer.push_back(argRef);
+
+        std::string paramName;
+        if (paramDecl && paramDecl->direct) {
+            paramName = extract_direct_decl_name(paramDecl->direct);
+        }
+        if (paramName.empty()) continue;
+
+        Value addr = build_alloca(paramTy);
+        addr->name = "%" + paramName;
+        build_store(argRef, addr);
+
+        auto sym = std::make_shared<symtab::Symbol>();
+        sym->name = paramName;
+        sym->kind = symtab::SymbolKind::Object;
+        sym->type = nullptr;
+        sym->irValue = addr;
+        symtab.define(sym);
+    }
     
     // 处理函数体
     if (auto body = std::dynamic_pointer_cast<CompoundStmt>(fdef->body)) {
@@ -1730,6 +1791,12 @@ Value IRBuilder::build_call(Function func, const std::vector<Value>& args) {
     auto valData = std::make_shared<ValueData>();
     valData->kind.tag = ValueTag::CALL;
     valData->kind.data = callData;
+    if (func->ty && func->ty->tag == TypeTag::FUNCTION) {
+        auto fnTy = std::get<std::shared_ptr<TypeKind::function>>(func->ty->data);
+        if (fnTy) {
+            valData->ty = fnTy->ret;
+        }
+    }
 
     if (currentBB_) {
         currentBB_->insts.buffer.push_back(valData);

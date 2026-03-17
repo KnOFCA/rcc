@@ -4,3 +4,5 @@ generated/
 ANTLR/.antlr
 .cache
 test/
+*.out
+*.rir

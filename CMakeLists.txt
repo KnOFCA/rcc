@@ -87,12 +87,18 @@ file(GLOB IR_SRCS CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/src/ir/*.cxx"
 )
 
+file(GLOB BACKEND_SRCS CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/backend/*.cpp"
+    "${PROJECT_SOURCE_DIR}/src/backend/*.cxx"
+)
+
 # 组合所有源文件
 set(ANTLR4_DEMO_SRC
     ${MAIN_SRC}
     ${ANTLR_GENERATED_SRC}
     ${FRONT_SRCS}
     ${IR_SRCS}
+    ${BACKEND_SRCS}
 )
 
 # 添加可执行文件

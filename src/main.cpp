@@ -1,69 +1,155 @@
 #include <any>
+#include <fstream>
 #include <iostream>
 #include <memory>
-#include <fstream>
+#include <optional>
+#include <sstream>
+#include <string>
 
 #include "antlr4-runtime.h"
 #include "./ANTLR/TLexer.h"
 #include "./ANTLR/TParser.h"
-#include "./front/ASTBuilder.h"
+#include "./backend/RISCV64Backend.h"
 #include "./front/AST.h"
-#include "./front/ASTPrinter.h"
+#include "./front/ASTBuilder.h"
 #include "./ir/IRBuilder.h"
 
 using namespace antlrcpptest;
 using namespace antlr4;
 
-int main(int argc, const char **argv) {
-  std::ifstream file;
-  std::istream *inputStream = &std::cin; // default to stdin
-  
-  if (argc > 1) {
-      file.open(argv[1]);
-      if (!file.is_open()) {
-          std::cerr << "can not open file: " << argv[1] << std::endl;
-          return 1;
+namespace {
+
+enum class EmitKind {
+  IR,
+  ASM,
+};
+
+struct CommandLineOptions {
+  std::string input_path;
+  std::optional<std::string> output_path;
+  EmitKind emit_kind{EmitKind::IR};
+};
+
+void print_usage(const char *argv0) {
+  std::cerr << "usage: " << argv0 << " <input.c> [-emit-ir | -S] [-o <output>]\n";
+}
+
+std::optional<CommandLineOptions> parse_args(int argc, const char **argv) {
+  CommandLineOptions options;
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "-emit-ir") {
+      options.emit_kind = EmitKind::IR;
+      continue;
+    }
+    if (arg == "-S") {
+      options.emit_kind = EmitKind::ASM;
+      continue;
+    }
+    if (arg == "-o") {
+      if (i + 1 >= argc) {
+        std::cerr << "missing output path after -o\n";
+        return std::nullopt;
       }
-      inputStream = &file;
+      options.output_path = argv[++i];
+      continue;
+    }
+    if (!arg.empty() && arg[0] == '-') {
+      std::cerr << "unknown option: " << arg << '\n';
+      return std::nullopt;
+    }
+    if (!options.input_path.empty()) {
+      std::cerr << "multiple input files are not supported\n";
+      return std::nullopt;
+    }
+    options.input_path = arg;
   }
-  
-  antlr4::ANTLRInputStream input(*inputStream);
+
+  if (options.input_path.empty()) {
+    std::cerr << "missing input file\n";
+    return std::nullopt;
+  }
+  return options;
+}
+
+} // namespace
+
+int main(int argc, const char **argv) {
+  auto options = parse_args(argc, argv);
+  if (!options.has_value()) {
+    print_usage(argv[0]);
+    return 1;
+  }
+
+  std::ifstream file(options->input_path);
+  if (!file.is_open()) {
+    std::cerr << "can not open file: " << options->input_path << std::endl;
+    return 1;
+  }
+
+  ANTLRInputStream input(file);
   TLexer lexer(&input);
   CommonTokenStream tokens(&lexer);
-
-  tokens.fill();
-  for (auto token : tokens.getTokens()) {
-      std::cout << token->toString() << std::endl;
-  }
-
   TParser parser(&tokens);
-  tree::ParseTree* tree = parser.translationUnit();
+  tree::ParseTree *tree = parser.translationUnit();
+  if (parser.getNumberOfSyntaxErrors() != 0) {
+    std::cerr << "parse failed with " << parser.getNumberOfSyntaxErrors()
+              << " syntax error(s)" << std::endl;
+    return 1;
+  }
 
   rcc::front::ASTBuilder builder;
   auto tu = std::any_cast<std::shared_ptr<ast::TranslationUnit>>(builder.visit(tree));
-  // std::cout << tree::Trees::toStringTree(tree, &parser) << std::endl;
-  for (auto child : tree->children) {
-  if (auto extDecl = dynamic_cast<TParser::ExternalDeclarationContext*>(child)) {
-      if (auto funcDef = extDecl->functionDefinition()) {
-        std::cout << "Function Definition subtree:" << std::endl;
-        std::cout << antlr4::tree::Trees::toStringTree(funcDef, &parser) << std::endl;
-      } else if (auto decl = extDecl->declaration()) {
-        std::cout << "Declaration subtree:" << std::endl;
-        std::cout << antlr4::tree::Trees::toStringTree(decl, &parser) << std::endl;
-      }
-    }
-  }
-
-  //rcc::front::ASTPrinter printer;
-  //printer.visit(tu);
 
   rcc::ir::IRBuilder irbuilder;
-  irbuilder.build_from_AST(tu);
+  auto ir_result = irbuilder.build_from_AST(tu);
+  if (ir_result != rcc::ir::ErrorCode::SUCCESS) {
+    std::cerr << "failed to build IR" << std::endl;
+    return 1;
+  }
 
-  irbuilder.dump_to_stdout();
+  auto program = irbuilder.get_program();
+  if (!program) {
+    std::cerr << "IR program is empty" << std::endl;
+    return 1;
+  }
 
-  if (file.is_open()) {
-      file.close();
+  if (options->emit_kind == EmitKind::IR) {
+    auto dump_result = options->output_path.has_value()
+                           ? irbuilder.dump_to_file(*options->output_path)
+                           : irbuilder.dump_to_stdout();
+    if (dump_result != rcc::ir::ErrorCode::SUCCESS) {
+      std::cerr << "failed to write IR output" << std::endl;
+      return 1;
+    }
+    return 0;
+  }
+
+  std::ostringstream asm_buffer;
+  auto backend_result = rcc::backend::emit_riscv64(*program, asm_buffer);
+  if (!backend_result.ok()) {
+    std::cerr << "backend error: " << backend_result.message << std::endl;
+    return 1;
+  }
+
+  if (options->output_path.has_value()) {
+    std::ofstream output_file(*options->output_path);
+    if (!output_file.is_open()) {
+      std::cerr << "can not open output file: " << *options->output_path << std::endl;
+      return 1;
+    }
+    output_file << asm_buffer.str();
+    if (!output_file.good()) {
+      std::cerr << "failed to write assembly output" << std::endl;
+      return 1;
+    }
+  } else {
+    std::cout << asm_buffer.str();
+    if (!std::cout.good()) {
+      std::cerr << "failed to write assembly output" << std::endl;
+      return 1;
+    }
   }
 
   return 0;
