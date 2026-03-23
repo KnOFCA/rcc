@@ -12,6 +12,7 @@
 #include "./backend/RISCV64Backend.h"
 #include "./front/AST.h"
 #include "./front/ASTBuilder.h"
+#include "./front/ASTPrinter.h"
 #include "./ir/IRBuilder.h"
 
 using namespace antlrcpptest;
@@ -20,6 +21,7 @@ using namespace antlr4;
 namespace {
 
 enum class EmitKind {
+  AST,
   IR,
   ASM,
 };
@@ -31,7 +33,7 @@ struct CommandLineOptions {
 };
 
 void print_usage(const char *argv0) {
-  std::cerr << "usage: " << argv0 << " <input.c> [-emit-ir | -S] [-o <output>]\n";
+  std::cerr << "usage: " << argv0 << " <input.c> [-emit-ast | -emit-ir | -S] [-o <output>]\n";
 }
 
 std::optional<CommandLineOptions> parse_args(int argc, const char **argv) {
@@ -41,6 +43,10 @@ std::optional<CommandLineOptions> parse_args(int argc, const char **argv) {
     const std::string arg = argv[i];
     if (arg == "-emit-ir") {
       options.emit_kind = EmitKind::IR;
+      continue;
+    }
+    if (arg == "-emit-ast") {
+      options.emit_kind = EmitKind::AST;
       continue;
     }
     if (arg == "-S") {
@@ -101,6 +107,36 @@ int main(int argc, const char **argv) {
 
   rcc::front::ASTBuilder builder;
   auto tu = std::any_cast<std::shared_ptr<ast::TranslationUnit>>(builder.visit(tree));
+
+  if (options->emit_kind == EmitKind::AST) {
+    if (options->output_path.has_value()) {
+      std::ofstream output_file(*options->output_path);
+      if (!output_file.is_open()) {
+        std::cerr << "can not open output file: " << *options->output_path << std::endl;
+        return 1;
+      }
+      rcc::front::ASTPrinter printer(output_file);
+      if (!printer.print(tu)) {
+        std::cerr << "failed to print AST" << std::endl;
+        return 1;
+      }
+      if (!output_file.good()) {
+        std::cerr << "failed to write AST output" << std::endl;
+        return 1;
+      }
+    } else {
+      rcc::front::ASTPrinter printer(std::cout);
+      if (!printer.print(tu)) {
+        std::cerr << "failed to print AST" << std::endl;
+        return 1;
+      }
+      if (!std::cout.good()) {
+        std::cerr << "failed to write AST output" << std::endl;
+        return 1;
+      }
+    }
+    return 0;
+  }
 
   rcc::ir::IRBuilder irbuilder;
   auto ir_result = irbuilder.build_from_AST(tu);

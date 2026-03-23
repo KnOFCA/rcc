@@ -4,23 +4,17 @@
 #include "ASTVisitor.h"
 
 #include <memory>
-
-#include <iostream>
+#include <ostream>
 
 namespace rcc::front {
 
 class ASTPrinter : public ASTVisitor<ASTPrinter> {
-  public:
-    //using ASTVisitor<ASTPrinter>::visitImpl;
-    ///
-    /// visit method.
-    ///
+public:
+    explicit ASTPrinter(std::ostream& out);
+    bool print(const std::shared_ptr<ast::TranslationUnit>& tu);
 
-    // void visitImpl(const std::shared_ptr<ast::Declarator> &decl) { 
-    //     if (decl->pointer) visit(decl->pointer);
-    //     if (decl->direct) visit(decl->direct);
-    // }
-
-    // void visitImpl(const std::shared_ptr<ast::IdExpr> &id) { std::cout << id->name; }
+private:
+    std::ostream& out_;
 };
-}
+
+} // namespace rcc::front

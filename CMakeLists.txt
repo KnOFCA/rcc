@@ -102,20 +102,20 @@ set(ANTLR4_DEMO_SRC
 )
 
 # 添加可执行文件
-add_executable(antlr4-demo ${ANTLR4_DEMO_SRC})
+add_executable(rcc ${ANTLR4_DEMO_SRC})
 
 # 设置目标属性
-set_target_properties(antlr4-demo PROPERTIES
+set_target_properties(rcc PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
 )
 
 # 添加依赖关系
-add_dependencies(antlr4-demo GenerateParser)
+add_dependencies(rcc GenerateParser)
 
 # 包含目录
-target_include_directories(antlr4-demo PRIVATE
+target_include_directories(rcc PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/generated
     ${PROJECT_SOURCE_DIR}/runtime/src
@@ -129,17 +129,17 @@ target_include_directories(antlr4-demo PRIVATE
 
 # 编译器特定设置
 if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    target_compile_options(antlr4-demo PRIVATE 
+    target_compile_options(rcc PRIVATE 
         "/MP"           # 启用多处理器编译
         "/MT$<$<CONFIG:Debug>:d>"
         "/wd4251"       # 禁用特定的警告
     )
-    target_compile_definitions(antlr4-demo PRIVATE 
+    target_compile_definitions(rcc PRIVATE 
         _CRT_SECURE_NO_WARNINGS
     )
 else()
     # GCC/Clang编译器选项
-    target_compile_options(antlr4-demo PRIVATE
+    target_compile_options(rcc PRIVATE
         -Wall
         -Wextra
         -Wno-overloaded-virtual
@@ -148,7 +148,7 @@ else()
     
     # 如果是Clang，添加更多警告选项
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        target_compile_options(antlr4-demo PRIVATE
+        target_compile_options(rcc PRIVATE
             -Wno-c++98-compat
             -Wno-c++98-compat-pedantic
         )
@@ -156,14 +156,14 @@ else()
 endif()
 
 # 链接库和目录
-target_link_directories(antlr4-demo PRIVATE
+target_link_directories(rcc PRIVATE
     ${PROJECT_SOURCE_DIR}/lib
 )
 
-target_link_libraries(antlr4-demo antlr4-runtime)
+target_link_libraries(rcc antlr4-runtime)
 
 # 安装规则
-install(TARGETS antlr4-demo 
+install(TARGETS rcc 
         DESTINATION bin
         COMPONENT runtime
 )
@@ -172,9 +172,9 @@ install(TARGETS antlr4-demo
 option(WITH_DEBUG_INFO "Build with debug information" ON)
 if(WITH_DEBUG_INFO)
     if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-        target_compile_options(antlr4-demo PRIVATE /Zi)
-        target_link_options(antlr4-demo PRIVATE /DEBUG)
+        target_compile_options(rcc PRIVATE /Zi)
+        target_link_options(rcc PRIVATE /DEBUG)
     else()
-        target_compile_options(antlr4-demo PRIVATE -g3)
+        target_compile_options(rcc PRIVATE -g3)
     endif()
 endif()
