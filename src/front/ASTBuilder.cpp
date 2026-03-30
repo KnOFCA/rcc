@@ -106,6 +106,11 @@ std::any ASTBuilder::visitDeclarationSpecifiers(TParser::DeclarationSpecifiersCo
         node->specs.push_back(spec);
     }
 
+    // for void DeclarationSpecifiers
+    if(node->specs.size() == 1 &&
+        std::static_pointer_cast<ast::BuiltinTypeSpec>(node->specs[0])->builtin == ast::BuiltinTypeSpec::Builtin::Void)
+        return std::make_shared<ast::DeclSpec>();
+
     return node;
 }
 

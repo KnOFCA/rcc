@@ -52,7 +52,14 @@ class IRTextDumper : public IRVisitor<IRTextDumper> {
     bool TraverseFunction(Function func) {
         if (!func) return true;
 
-        out_ << "fun " << function_name(func) << "(): " << function_return_type(func) << " {\n";
+        if (func->bbs.buffer.empty()) {
+            out_ << "decl " << function_name(func) << "(" << function_param_types(func)
+                 << "): " << function_return_type(func) << "\n";
+            return true;
+        }
+
+        out_ << "fun " << function_name(func) << "(" << function_param_types(func)
+             << "): " << function_return_type(func) << " {\n";
 
         bool ok = detail::visit_slice_items(func->bbs, SliceItemKind::BASIC_BLOCK,
                                             [&](const Slice::ItemsPtr& item) {
@@ -254,6 +261,24 @@ class IRTextDumper : public IRVisitor<IRTextDumper> {
         auto fnType = std::get<std::shared_ptr<TypeKind::function>>(func->ty->data);
         if (!fnType) return "unit";
         return type_to_string(fnType->ret);
+    }
+
+    std::string function_param_types(Function func) {
+        if (!func || !func->ty || func->ty->tag != TypeTag::FUNCTION) {
+            return "";
+        }
+        auto fnType = std::get<std::shared_ptr<TypeKind::function>>(func->ty->data);
+        if (!fnType) return "";
+
+        std::ostringstream oss;
+        bool first = true;
+        for (const auto& param : fnType->params.buffer) {
+            if (!std::holds_alternative<Type>(param)) continue;
+            if (!first) oss << ", ";
+            first = false;
+            oss << type_to_string(std::get<Type>(param));
+        }
+        return oss.str();
     }
 
     std::string type_to_string(Type ty) {

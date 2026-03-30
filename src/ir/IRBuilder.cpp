@@ -131,6 +131,144 @@ bool is_float_type(Type ty) {
     return ty->tag == TypeTag::FLOAT || ty->tag == TypeTag::DOUBLE;
 }
 
+Value make_number_value(const Number::number& num, TypeTag tag) {
+    auto value = std::make_shared<ValueData>();
+    value->kind.tag = ValueTag::NUMBER;
+    value->kind.data = Number{num};
+    value->ty = std::make_shared<TypeKind>();
+    value->ty->tag = tag;
+    return value;
+}
+
+Value make_zero_init_value() {
+    auto value = std::make_shared<ValueData>();
+    value->kind.tag = ValueTag::ZERO_INIT;
+    return value;
+}
+
+Type make_scalar_type(TypeTag tag) {
+    auto ty = std::make_shared<TypeKind>();
+    ty->tag = tag;
+    return ty;
+}
+
+std::optional<long double> number_to_long_double(const Number::number& num) {
+    if (std::holds_alternative<Integer8>(num)) return std::get<Integer8>(num).value;
+    if (std::holds_alternative<Integer16>(num)) return std::get<Integer16>(num).value;
+    if (std::holds_alternative<Integer32>(num)) return std::get<Integer32>(num).value;
+    if (std::holds_alternative<Integer64>(num)) return std::get<Integer64>(num).value;
+    if (std::holds_alternative<Float>(num)) return std::get<Float>(num).value;
+    if (std::holds_alternative<Double>(num)) return std::get<Double>(num).value;
+    return std::nullopt;
+}
+
+Value convert_constant_number(const Number::number& num, Type ty) {
+    if (!ty) return nullptr;
+
+    auto as_ld = number_to_long_double(num);
+    if (!as_ld.has_value()) return nullptr;
+
+    switch (ty->tag) {
+        case TypeTag::INT8:
+            return make_number_value(Integer8{static_cast<int8_t>(*as_ld)}, TypeTag::INT8);
+        case TypeTag::INT16:
+            return make_number_value(Integer16{static_cast<int16_t>(*as_ld)}, TypeTag::INT16);
+        case TypeTag::INT32:
+            return make_number_value(Integer32{static_cast<int32_t>(*as_ld)}, TypeTag::INT32);
+        case TypeTag::INT64:
+            return make_number_value(Integer64{static_cast<int64_t>(*as_ld)}, TypeTag::INT64);
+        case TypeTag::FLOAT:
+            return make_number_value(Float{static_cast<float>(*as_ld)}, TypeTag::FLOAT);
+        case TypeTag::DOUBLE:
+            return make_number_value(Double{static_cast<double>(*as_ld)}, TypeTag::DOUBLE);
+        default:
+            return nullptr;
+    }
+}
+
+Value fold_constant_expr(const std::shared_ptr<Expr>& expr, Type targetTy) {
+    if (!expr) return nullptr;
+
+    if (auto lit = std::dynamic_pointer_cast<LiteralExpr>(expr)) {
+        switch (lit->type) {
+            case LiteralExpr::INTEGER:
+                return convert_constant_number(Number::number{Integer32{static_cast<int32_t>(std::stoi(lit->value))}},
+                                               targetTy ? targetTy : make_scalar_type(TypeTag::INT32));
+            case LiteralExpr::FLOAT:
+                return convert_constant_number(Number::number{Float{std::stof(lit->value)}},
+                                               targetTy ? targetTy : make_scalar_type(TypeTag::FLOAT));
+            case LiteralExpr::CHAR:
+                return convert_constant_number(Number::number{Integer32{parse_char_literal_value(lit->value)}},
+                                               targetTy ? targetTy : make_scalar_type(TypeTag::INT32));
+            default:
+                return nullptr;
+        }
+    }
+
+    if (auto cast = std::dynamic_pointer_cast<CastExpr>(expr)) {
+        Type dstTy = nullptr;
+        if (cast->type) {
+            IRBuilder temp_builder;
+            dstTy = temp_builder.build_type(cast->type->specs, nullptr);
+        }
+        auto inner = fold_constant_expr(std::dynamic_pointer_cast<Expr>(cast->expr), dstTy);
+        if (!inner) return nullptr;
+        if (!targetTy) return inner;
+        const auto& number = std::get<Number>(inner->kind.data);
+        return convert_constant_number(number.num, targetTy);
+    }
+
+    return nullptr;
+}
+
+Value build_constant_initializer(const std::shared_ptr<Initializer>& init,
+                                 Type ty) {
+    if (!ty) return nullptr;
+    if (!init) return make_zero_init_value();
+
+    if (ty->tag == TypeTag::ARRAY) {
+        auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
+        if (!arrTy || !arrTy->base) return nullptr;
+
+        auto aggregate = std::make_shared<ValueData>();
+        aggregate->kind.tag = ValueTag::AGGREGATE;
+        Aggregate agg;
+        agg.elems.kind = SliceItemKind::VALUE;
+
+        if (auto list = std::dynamic_pointer_cast<InitList>(init)) {
+            const std::size_t initCount = std::min(arrTy->len, list->elements.size());
+            for (std::size_t i = 0; i < initCount; ++i) {
+                agg.elems.buffer.push_back(build_constant_initializer(list->elements[i], arrTy->base));
+            }
+            for (std::size_t i = initCount; i < arrTy->len; ++i) {
+                agg.elems.buffer.push_back(make_zero_init_value());
+            }
+        } else {
+            for (std::size_t i = 0; i < arrTy->len; ++i) {
+                agg.elems.buffer.push_back(make_zero_init_value());
+            }
+        }
+
+        aggregate->kind.data = agg;
+        return aggregate;
+    }
+
+    if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(init)) {
+        if (auto folded = fold_constant_expr(std::dynamic_pointer_cast<Expr>(exprInit->expr), ty)) {
+            return folded;
+        }
+    }
+
+    if (auto list = std::dynamic_pointer_cast<InitList>(init)) {
+        if (!list->elements.empty()) {
+            return build_constant_initializer(list->elements.front(), ty);
+        }
+        return make_zero_init_value();
+    }
+
+    return nullptr;
+}
+
 Type pointee_type(Type ptrTy) {
     if (!ptrTy || ptrTy->tag != TypeTag::POINTER) return nullptr;
     auto ptr = std::get<std::shared_ptr<TypeKind::pointer>>(ptrTy->data);
@@ -293,9 +431,29 @@ ErrorCode IRBuilder::build_from_AST(std::shared_ptr<TranslationUnit> node) {
     // 遍历所有外部声明
     for (auto& ed : node->externalDecls) {
         if (auto decl = std::dynamic_pointer_cast<Declaration>(ed)) {
-            auto val = build_global_declaration(decl);
-            if (val) {
-                program->values.buffer.push_back(val);
+            std::vector<std::shared_ptr<InitDeclarator>> globalDecls;
+            for (const auto& initDecl : decl->initDeclarators) {
+                if (!initDecl || !initDecl->declarator) continue;
+
+                Type ty = build_type(decl->specs, initDecl->declarator);
+                if (ty && ty->tag == TypeTag::FUNCTION) {
+                    auto func = build_function_declaration(decl, initDecl);
+                    if (func) {
+                        program->funcs.buffer.push_back(func);
+                    }
+                    continue;
+                }
+                globalDecls.push_back(initDecl);
+            }
+
+            if (!globalDecls.empty()) {
+                auto globalsOnly = std::make_shared<Declaration>();
+                globalsOnly->specs = decl->specs;
+                globalsOnly->initDeclarators = std::move(globalDecls);
+                auto val = build_global_declaration(globalsOnly);
+                if (val) {
+                    program->values.buffer.push_back(val);
+                }
             }
         } else if (auto fdef = std::dynamic_pointer_cast<FunctionDef>(ed)) {
             auto func = build_function(fdef);
@@ -319,6 +477,34 @@ std::shared_ptr<Program> IRBuilder::get_program() const {
 // ============================================================================
 // 函数定义
 // ============================================================================
+
+namespace {
+
+void register_function_symbol(symtab::SymbolTable& symtab,
+                              const std::string& name,
+                              const Function& function) {
+    if (name.empty()) {
+        return;
+    }
+
+    auto current = symtab.currentScope();
+    if (current) {
+        auto existing = current->lookupLocal(name);
+        if (existing && existing->kind == symtab::SymbolKind::Function) {
+            existing->irFunction = function;
+            return;
+        }
+    }
+
+    auto sym = std::make_shared<symtab::Symbol>();
+    sym->name = name;
+    sym->kind = symtab::SymbolKind::Function;
+    sym->type = nullptr;
+    sym->irFunction = function;
+    symtab.define(sym);
+}
+
+} // namespace
 
 // TODO: fill param
 Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
@@ -349,12 +535,7 @@ Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
         if (!nm.empty() && nm[0] == '@') {
             nm = nm.substr(1);
         }
-        auto sym = std::make_shared<symtab::Symbol>();
-        sym->name = nm;
-        sym->kind = symtab::SymbolKind::Function;
-        sym->type = nullptr;
-        sym->irFunction = funcData;
-        symtab.define(sym);
+        register_function_symbol(symtab, nm, funcData);
     }
 
     // 进入函数体作用域
@@ -409,6 +590,33 @@ Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
     symtab.leaveScope();
     
     currentFunc_ = nullptr;
+    return funcData;
+}
+
+Function IRBuilder::build_function_declaration(const std::shared_ptr<Declaration>& decl,
+                                               const std::shared_ptr<InitDeclarator>& initDecl) {
+    if (!decl || !decl->specs || !initDecl || !initDecl->declarator) {
+        return nullptr;
+    }
+
+    Type funcType = build_type(decl->specs, initDecl->declarator);
+    if (!funcType || funcType->tag != TypeTag::FUNCTION) {
+        return nullptr;
+    }
+
+    auto funcData = std::make_shared<FunctionData>();
+    funcData->ty = funcType;
+    funcData->params.kind = SliceItemKind::VALUE;
+    funcData->bbs.kind = SliceItemKind::BASIC_BLOCK;
+
+    if (initDecl->declarator->direct) {
+        auto fnName = extract_direct_decl_name(initDecl->declarator->direct);
+        if (!fnName.empty()) {
+            funcData->name = "@" + fnName;
+            register_function_symbol(symtab, fnName, funcData);
+        }
+    }
+
     return funcData;
 }
 
@@ -476,9 +684,10 @@ Value IRBuilder::build_global_declaration(const std::shared_ptr<Declaration>& de
                 }
                 aggInit->kind.data = agg;
                 valData->kind.data = GlobalAlloc{aggInit};
-            } else if (auto exprInit = std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
-                valData->kind.data = GlobalAlloc{build_expr(
-                    std::dynamic_pointer_cast<Expr>(exprInit->expr))};
+            } else if (auto const_init = build_constant_initializer(initDecl->initializer, ty)) {
+                valData->kind.data = GlobalAlloc{const_init};
+            } else {
+                valData->kind.data = GlobalAlloc{make_zero_init_value()};
             }
         } else {
             // 零初始化
@@ -995,6 +1204,13 @@ Value IRBuilder::build_postfix_expr(const std::shared_ptr<PostfixExpr>& post) {
 
         auto ptr = std::make_shared<ValueData>();
         ptr->name = "%" + std::to_string(tempCounter_++);
+        Type basePointee = pointee_type(base->ty);
+        if (basePointee && basePointee->tag == TypeTag::ARRAY) {
+            auto arr = std::get<std::shared_ptr<TypeKind::array>>(basePointee->data);
+            ptr->ty = (arr && arr->base) ? build_pointer_type(arr->base) : base->ty;
+        } else {
+            ptr->ty = base->ty;
+        }
         ptr->kind.tag = ValueTag::GET_PTR;
         ptr->kind.data = GetPtr{base, idx};
         if (currentBB_) {
@@ -1066,6 +1282,23 @@ Value IRBuilder::build_id_expr(const std::shared_ptr<IdExpr>& id) {
     if (!addr) {
         std::cerr << "Error: symbol has no associated address: " << id->name << std::endl;
         return nullptr;
+    }
+
+    Type objectTy = pointee_type(addr->ty);
+    if (objectTy && objectTy->tag == TypeTag::ARRAY) {
+        auto arrTy = std::get<std::shared_ptr<TypeKind::array>>(objectTy->data);
+        if (arrTy && arrTy->base) {
+            auto zero = build_integer_const(0);
+            auto elemAddr = std::make_shared<ValueData>();
+            elemAddr->name = "%" + std::to_string(tempCounter_++);
+            elemAddr->ty = build_pointer_type(arrTy->base);
+            elemAddr->kind.tag = ValueTag::GET_ELEM_PTR;
+            elemAddr->kind.data = GetElemPtr{addr, zero};
+            if (currentBB_) {
+                currentBB_->insts.buffer.push_back(elemAddr);
+            }
+            return elemAddr;
+        }
     }
     return build_load(addr);
 }
@@ -1415,6 +1648,13 @@ Value IRBuilder::build_lvalue(const std::shared_ptr<ast::Expr>& expr) {
 
             auto valData = std::make_shared<ValueData>();
             valData->name = "%" + std::to_string(tempCounter_++);
+            Type basePointee = pointee_type(base->ty);
+            if (basePointee && basePointee->tag == TypeTag::ARRAY) {
+                auto arr = std::get<std::shared_ptr<TypeKind::array>>(basePointee->data);
+                valData->ty = (arr && arr->base) ? build_pointer_type(arr->base) : base->ty;
+            } else {
+                valData->ty = base->ty;
+            }
             valData->kind.tag = ValueTag::GET_PTR;
             valData->kind.data = GetPtr{base, idx};
             if (currentBB_) currentBB_->insts.buffer.push_back(valData);
@@ -1429,6 +1669,13 @@ Value IRBuilder::build_lvalue(const std::shared_ptr<ast::Expr>& expr) {
             Value idx = build_expr(std::dynamic_pointer_cast<Expr>(bin->rhs));
             auto valData = std::make_shared<ValueData>();
             valData->name = "%" + std::to_string(tempCounter_++);
+            Type basePointee = pointee_type(base->ty);
+            if (basePointee && basePointee->tag == TypeTag::ARRAY) {
+                auto arr = std::get<std::shared_ptr<TypeKind::array>>(basePointee->data);
+                valData->ty = (arr && arr->base) ? build_pointer_type(arr->base) : base->ty;
+            } else {
+                valData->ty = base->ty;
+            }
             valData->kind.tag = ValueTag::GET_PTR;
             valData->kind.data = GetPtr{base, idx};
             if (currentBB_) currentBB_->insts.buffer.push_back(valData);
@@ -1552,7 +1799,13 @@ Value IRBuilder::build_binary(BinaryOp op, Value lhs, Value rhs) {
     valData->name = "%" + std::to_string(tempCounter_++);
     valData->kind.tag = ValueTag::BINARY;
     valData->kind.data = Binary{op, lhs, rhs};
-    valData->ty = lhs->ty;
+    if (op == BinaryOp::EQ || op == BinaryOp::NOT_EQ || op == BinaryOp::LT ||
+        op == BinaryOp::GT || op == BinaryOp::LE || op == BinaryOp::GE) {
+        valData->ty = std::make_shared<TypeKind>();
+        valData->ty->tag = TypeTag::INT32;
+    } else {
+        valData->ty = lhs->ty;
+    }
     
     if (currentBB_) {
         currentBB_->insts.buffer.push_back(valData);

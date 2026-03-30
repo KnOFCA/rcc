@@ -39,6 +39,8 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
 
     // 处理函数定义
     Function build_function(const std::shared_ptr<ast::FunctionDef>& fdef);
+    Function build_function_declaration(const std::shared_ptr<ast::Declaration>& decl,
+                                        const std::shared_ptr<ast::InitDeclarator>& initDecl);
 
     // 处理全局声明/变量
     Value build_global_declaration(const std::shared_ptr<ast::Declaration>& decl);
