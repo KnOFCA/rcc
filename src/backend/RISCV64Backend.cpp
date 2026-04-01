@@ -5,6 +5,14 @@
 
 namespace rcc::backend {
 
+namespace {
+
+bool is_readonly_global(const ir::Value& global) {
+    return global && global->name && global->name->rfind("@.str.", 0) == 0;
+}
+
+} // namespace
+
 BackendError RISCV64Backend::emit_program(const ir::Program& program,
                                           std::ostream& out) {
     bool emitted_anything = false;
@@ -58,7 +66,13 @@ BackendError RISCV64Backend::emit_global(const ir::Value& global, std::ostream& 
     const bool zero_init = is_zero_initializer(alloc.init);
     const std::string symbol = value_symbol(global);
 
-    out << (zero_init ? ".section .bss\n" : ".section .data\n");
+    if (zero_init) {
+        out << ".section .bss\n";
+    } else if (is_readonly_global(global)) {
+        out << ".section .rodata\n";
+    } else {
+        out << ".section .data\n";
+    }
     out << ".globl " << symbol << '\n';
     out << ".align " << std::max<std::size_t>(1, type_align(ptr->base)) << '\n';
     out << symbol << ":\n";
@@ -309,7 +323,11 @@ std::string RISCV64Backend::block_label(const ir::BasicBlock& bb, FunctionContex
 
     std::string label;
     if (bb->name && !bb->name->empty()) {
-        label = (ctx.function->name->empty() ? "" : *ctx.function->name) + "_" + detail::strip_global_prefix(bb->name, "");
+        const std::string fn_name =
+            ctx.function && ctx.function->name
+                ? detail::strip_global_prefix(ctx.function->name, "fn")
+                : "fn";
+        label = fn_name + "_" + detail::strip_global_prefix(bb->name, "");
     } else {
         label = ".Lbb" + std::to_string(ctx.next_block_id++);
     }

@@ -28,6 +28,8 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
     std::vector<SwitchContext> switchStack_;
     std::unordered_map<std::string, BasicBlock> labelBBs_;
     std::unordered_map<std::string, std::size_t> bbNameCounters_;
+    std::unordered_map<std::string, Value> stringLiteralGlobals_;
+    std::size_t stringLiteralCounter_ = 0;
     long tempCounter_ = 0;
     
     // 从 AST 生成 IR 程序
@@ -115,6 +117,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
 
     // 函数调用
     Value build_call(Function func, const std::vector<Value>& args);
+    Value build_string_literal_pointer(const std::string& raw);
 
     // 返回
     void build_ret(Value value = nullptr);

@@ -136,6 +136,8 @@ class RISCV64Backend final : public Backend {
                                                 std::ostream& out);
 
     std::optional<std::int64_t> extract_integer(const ir::Value& value) const;
+    std::optional<std::pair<std::string, std::int64_t>>
+    extract_global_address(const ir::Value& value) const;
     std::optional<std::uint32_t> extract_float_bits(const ir::Value& value) const;
     std::optional<std::uint64_t> extract_double_bits(const ir::Value& value) const;
     std::size_t type_size(ir::Type type) const;

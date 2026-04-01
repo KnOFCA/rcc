@@ -256,9 +256,12 @@ std::any ASTBuilder::visitDeclarator(TParser::DeclaratorContext *ctx) {
         decl->pointer = std::any_cast<std::shared_ptr<ast::Pointer>>(v);
     }
 
+    if (ctx->directDeclarator())
     {
         auto v = visit(ctx->directDeclarator());
         decl->direct = std::any_cast<std::shared_ptr<ast::DirectDeclarator>>(v);
+    } else {
+        decl->direct = nullptr;
     }
     return decl;
 }

@@ -1,5 +1,5 @@
 void test_expressions(void) {
-    float f = 3.14;
+    int f = 3;
 
     // 关系与逻辑
     int cond = (int)f >= 3;

@@ -2,6 +2,20 @@
 
 namespace rcc::backend {
 
+namespace {
+
+std::string format_symbol_with_offset(const std::string& symbol, std::int64_t offset) {
+    if (offset == 0) {
+        return symbol;
+    }
+    if (offset > 0) {
+        return symbol + " + " + std::to_string(offset);
+    }
+    return symbol + " - " + std::to_string(-offset);
+}
+
+} // namespace
+
 BackendError RISCV64Backend::emit_global_initializer(const ir::Value& init,
                                                      ir::Type type,
                                                      std::ostream& out) {
@@ -66,13 +80,26 @@ BackendError RISCV64Backend::emit_global_initializer(const ir::Value& init,
             out << "  .word " << *integer << '\n';
             return BackendError::success();
         case ir::TypeTag::INT64:
-        case ir::TypeTag::POINTER:
             if (!integer.has_value()) {
                 return {BackendErrorCode::UNSUPPORTED_IR,
                         "global initializer is not a supported integer constant"};
             }
             out << "  .dword " << *integer << '\n';
             return BackendError::success();
+        case ir::TypeTag::POINTER: {
+            if (integer.has_value()) {
+                out << "  .dword " << *integer << '\n';
+                return BackendError::success();
+            }
+            auto address = extract_global_address(init);
+            if (!address.has_value()) {
+                return {BackendErrorCode::UNSUPPORTED_IR,
+                        "global initializer is not a supported pointer constant"};
+            }
+            out << "  .dword " << format_symbol_with_offset(address->first, address->second)
+                << '\n';
+            return BackendError::success();
+        }
         case ir::TypeTag::FLOAT: {
             auto bits = extract_float_bits(init);
             if (!bits.has_value()) {
@@ -115,6 +142,42 @@ std::optional<std::int64_t> RISCV64Backend::extract_integer(const ir::Value& val
     if (std::holds_alternative<ir::Integer64>(number.num)) {
         return std::get<ir::Integer64>(number.num).value;
     }
+    return std::nullopt;
+}
+
+std::optional<std::pair<std::string, std::int64_t>>
+RISCV64Backend::extract_global_address(const ir::Value& value) const {
+    if (!value) {
+        return std::nullopt;
+    }
+
+    if (value->kind.tag == ir::ValueTag::GLOBAL_ALLOC) {
+        return std::pair<std::string, std::int64_t>{value_symbol(value), 0};
+    }
+
+    auto extract_index_offset = [&](const ir::Value& base,
+                                    const ir::Value& index,
+                                    ir::Type step_type) -> std::optional<std::pair<std::string, std::int64_t>> {
+        auto base_addr = extract_global_address(base);
+        auto idx = extract_integer(index);
+        const auto step = static_cast<std::int64_t>(type_size(step_type));
+        if (!base_addr.has_value() || !idx.has_value() || step == 0) {
+            return std::nullopt;
+        }
+        base_addr->second += (*idx) * step;
+        return base_addr;
+    };
+
+    if (value->kind.tag == ir::ValueTag::GET_ELEM_PTR) {
+        const auto& gep = std::get<ir::GetElemPtr>(value->kind.data);
+        return extract_index_offset(gep.src, gep.index, get_elem_ptr_step_type(gep.src));
+    }
+
+    if (value->kind.tag == ir::ValueTag::GET_PTR) {
+        const auto& gp = std::get<ir::GetPtr>(value->kind.data);
+        return extract_index_offset(gp.src, gp.index, get_ptr_step_type(gp.src));
+    }
+
     return std::nullopt;
 }
 

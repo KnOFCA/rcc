@@ -276,6 +276,19 @@ Type pointee_type(Type ptrTy) {
     return ptr->base;
 }
 
+std::shared_ptr<ast::Declarator> declarator_from_parameter_ast(const ast::AST& node) {
+    if (!node) return nullptr;
+    if (auto decl = std::dynamic_pointer_cast<ast::Declarator>(node)) {
+        return decl;
+    }
+    if (auto absDecl = std::dynamic_pointer_cast<ast::AbstractDeclarator>(node)) {
+        auto decl = std::make_shared<ast::Declarator>();
+        decl->pointer = absDecl->pointer;
+        return decl;
+    }
+    return nullptr;
+}
+
 bool is_char_array_type(Type ty) {
     if (!ty || ty->tag != TypeTag::ARRAY) return false;
     auto arr = std::get<std::shared_ptr<TypeKind::array>>(ty->data);
@@ -427,11 +440,12 @@ void collect_switch_labels(
 
 ErrorCode IRBuilder::build_from_AST(std::shared_ptr<TranslationUnit> node) {
     program = std::make_shared<Program>();
+    program->values.kind = SliceItemKind::VALUE;
+    program->funcs.kind = SliceItemKind::FUNCTION;
     
     // 遍历所有外部声明
     for (auto& ed : node->externalDecls) {
         if (auto decl = std::dynamic_pointer_cast<Declaration>(ed)) {
-            std::vector<std::shared_ptr<InitDeclarator>> globalDecls;
             for (const auto& initDecl : decl->initDeclarators) {
                 if (!initDecl || !initDecl->declarator) continue;
 
@@ -443,14 +457,11 @@ ErrorCode IRBuilder::build_from_AST(std::shared_ptr<TranslationUnit> node) {
                     }
                     continue;
                 }
-                globalDecls.push_back(initDecl);
-            }
 
-            if (!globalDecls.empty()) {
-                auto globalsOnly = std::make_shared<Declaration>();
-                globalsOnly->specs = decl->specs;
-                globalsOnly->initDeclarators = std::move(globalDecls);
-                auto val = build_global_declaration(globalsOnly);
+                auto globalDecl = std::make_shared<Declaration>();
+                globalDecl->specs = decl->specs;
+                globalDecl->initDeclarators.push_back(initDecl);
+                auto val = build_global_declaration(globalDecl);
                 if (val) {
                     program->values.buffer.push_back(val);
                 }
@@ -686,6 +697,18 @@ Value IRBuilder::build_global_declaration(const std::shared_ptr<Declaration>& de
                 valData->kind.data = GlobalAlloc{aggInit};
             } else if (auto const_init = build_constant_initializer(initDecl->initializer, ty)) {
                 valData->kind.data = GlobalAlloc{const_init};
+            } else if (auto exprInit =
+                           std::dynamic_pointer_cast<ExprInitializer>(initDecl->initializer)) {
+                Value initVal = build_expr(std::dynamic_pointer_cast<Expr>(exprInit->expr));
+                if (initVal &&
+                    (initVal->kind.tag == ValueTag::NUMBER ||
+                     initVal->kind.tag == ValueTag::GLOBAL_ALLOC ||
+                     initVal->kind.tag == ValueTag::GET_PTR ||
+                     initVal->kind.tag == ValueTag::GET_ELEM_PTR)) {
+                    valData->kind.data = GlobalAlloc{initVal};
+                } else {
+                    valData->kind.data = GlobalAlloc{make_zero_init_value()};
+                }
             } else {
                 valData->kind.data = GlobalAlloc{make_zero_init_value()};
             }
@@ -1198,7 +1221,7 @@ Value IRBuilder::build_postfix_expr(const std::shared_ptr<PostfixExpr>& post) {
         auto idxExpr = std::dynamic_pointer_cast<Expr>(post->expr);
         if (!baseExpr || !idxExpr) return nullptr;
 
-        Value base = build_lvalue(baseExpr);
+        Value base = build_expr(baseExpr);
         Value idx = build_expr(idxExpr);
         if (!base || !idx) return nullptr;
 
@@ -1642,7 +1665,7 @@ Value IRBuilder::build_lvalue(const std::shared_ptr<ast::Expr>& expr) {
             auto idxExpr = std::dynamic_pointer_cast<Expr>(post->expr);
             if (!baseExpr || !idxExpr) return nullptr;
 
-            Value base = build_lvalue(baseExpr);
+            Value base = build_expr(baseExpr);
             Value idx = build_expr(idxExpr);
             if (!base || !idx) return nullptr;
 
@@ -1688,6 +1711,10 @@ Value IRBuilder::build_lvalue(const std::shared_ptr<ast::Expr>& expr) {
 
 Value IRBuilder::build_literal_expr(const std::shared_ptr<LiteralExpr>& lit) {
     if (!lit) return nullptr;
+
+    if (lit->type == LiteralExpr::STRING) {
+        return build_string_literal_pointer(lit->value);
+    }
     
     auto valData = std::make_shared<ValueData>();
     valData->kind.tag = ValueTag::NUMBER;
@@ -1872,6 +1899,7 @@ Type IRBuilder::build_type(const std::shared_ptr<DeclSpec>& specs,
     
     // 解析基础类型
     Type baseType = std::make_shared<TypeKind>();
+    baseType->tag = TypeTag::UNIT;
     
     for (auto& spec : specs->specs) {
         if (auto bt = std::dynamic_pointer_cast<BuiltinTypeSpec>(spec)) {
@@ -1933,9 +1961,18 @@ Type IRBuilder::build_type(const std::shared_ptr<DeclSpec>& specs,
             collect_from_direct(std::dynamic_pointer_cast<DirectDeclarator>(ddCall->base));
             std::vector<Type> params;
             params.reserve(ddCall->params.size());
+            bool is_void_param_list = false;
             for (const auto& p : ddCall->params) {
-                auto pDecl = std::dynamic_pointer_cast<Declarator>(p->declarator);
-                params.push_back(build_type(p->specs, pDecl));
+                auto pDecl = declarator_from_parameter_ast(p ? p->declarator : nullptr);
+                auto paramTy = build_type(p ? p->specs : nullptr, pDecl);
+                if (ddCall->params.size() == 1 && paramTy && paramTy->tag == TypeTag::UNIT &&
+                    (!p || !p->declarator)) {
+                    is_void_param_list = true;
+                }
+                params.push_back(paramTy);
+            }
+            if (is_void_param_list) {
+                params.clear();
             }
             TypeCtor ctor{TypeCtor::Kind::Function, 0, {}};
             ctor.params = std::move(params);
@@ -2055,6 +2092,54 @@ Value IRBuilder::build_call(Function func, const std::vector<Value>& args) {
         currentBB_->insts.buffer.push_back(valData);
     }
     return valData;
+}
+
+Value IRBuilder::build_string_literal_pointer(const std::string& raw) {
+    auto it = stringLiteralGlobals_.find(raw);
+    Value global = it != stringLiteralGlobals_.end() ? it->second : nullptr;
+
+    if (!global) {
+        std::vector<int32_t> bytes = parse_string_literal_bytes(raw);
+        bytes.push_back(0);
+
+        auto charTy = std::make_shared<TypeKind>();
+        charTy->tag = TypeTag::INT8;
+        auto arrayTy = build_array_type(charTy, bytes.size());
+
+        auto init = std::make_shared<ValueData>();
+        init->kind.tag = ValueTag::AGGREGATE;
+        Aggregate agg;
+        agg.elems.kind = SliceItemKind::VALUE;
+        for (auto byte : bytes) {
+            agg.elems.buffer.push_back(build_integer_const(byte));
+        }
+        init->kind.data = agg;
+
+        global = std::make_shared<ValueData>();
+        global->ty = build_pointer_type(arrayTy);
+        global->name = "@.str." + std::to_string(stringLiteralCounter_++);
+        global->kind.tag = ValueTag::GLOBAL_ALLOC;
+        global->kind.data = GlobalAlloc{init};
+
+        stringLiteralGlobals_.emplace(raw, global);
+        if (program) {
+            program->values.buffer.push_back(global);
+        }
+    }
+
+    auto zero = build_integer_const(0);
+    auto charTy = std::make_shared<TypeKind>();
+    charTy->tag = TypeTag::INT8;
+    auto ptr = std::make_shared<ValueData>();
+    ptr->name = "%" + std::to_string(tempCounter_++);
+    ptr->ty = build_pointer_type(charTy);
+    ptr->kind.tag = ValueTag::GET_ELEM_PTR;
+    ptr->kind.data = GetElemPtr{global, zero};
+
+    if (currentBB_) {
+        currentBB_->insts.buffer.push_back(ptr);
+    }
+    return ptr;
 }
 
 } // namespace rcc::ir
