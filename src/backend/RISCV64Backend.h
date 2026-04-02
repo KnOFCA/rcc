@@ -24,6 +24,12 @@ struct RISCV64ArgLocation {
     ir::Type type{nullptr};
 };
 
+struct CallArgClassification {
+    std::vector<ir::Type> abi_arg_types;
+    bool is_variadic{false};
+    std::size_t fixed_arg_count{0};
+};
+
 class RISCV64Backend final : public Backend {
   public:
     BackendError emit_program(const ir::Program& program,

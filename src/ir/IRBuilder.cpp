@@ -53,6 +53,30 @@ std::vector<std::shared_ptr<ast::ParameterDecl>> extract_function_params(
     return {};
 }
 
+bool direct_declarator_has_varargs(
+    const std::shared_ptr<ast::DirectDeclarator>& direct) {
+    if (!direct) return false;
+    if (auto call = std::dynamic_pointer_cast<ast::DDCall>(direct)) {
+        return call->hasVarArgs;
+    }
+    if (auto arr = std::dynamic_pointer_cast<ast::DDArray>(direct)) {
+        return direct_declarator_has_varargs(arr->base);
+    }
+    if (auto paren = std::dynamic_pointer_cast<ast::DDParen>(direct)) {
+        auto innerDecl = std::dynamic_pointer_cast<ast::Declarator>(paren->inner);
+        if (!innerDecl) return false;
+        return direct_declarator_has_varargs(innerDecl->direct);
+    }
+    return false;
+}
+
+const std::shared_ptr<ir::TypeKind::function> extract_function_type(ir::Type type) {
+    if (!type || type->tag != ir::TypeTag::FUNCTION) {
+        return nullptr;
+    }
+    return std::get<std::shared_ptr<ir::TypeKind::function>>(type->data);
+}
+
 int32_t parse_char_literal_value(const std::string& raw) {
     if (raw.size() < 2 || raw.front() != '\'' || raw.back() != '\'') {
         return 0;
@@ -439,6 +463,7 @@ void collect_switch_labels(
 // ============================================================================
 
 ErrorCode IRBuilder::build_from_AST(std::shared_ptr<TranslationUnit> node) {
+    hadError_ = false;
     program = std::make_shared<Program>();
     program->values.kind = SliceItemKind::VALUE;
     program->funcs.kind = SliceItemKind::FUNCTION;
@@ -474,7 +499,7 @@ ErrorCode IRBuilder::build_from_AST(std::shared_ptr<TranslationUnit> node) {
         }
     }
     
-    return ErrorCode::SUCCESS;
+    return hadError_ ? ErrorCode::INVALID_PROGRAM : ErrorCode::SUCCESS;
 }
 
 void IRBuilder::delete_program() {
@@ -520,6 +545,11 @@ void register_function_symbol(symtab::SymbolTable& symtab,
 // TODO: fill param
 Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
     if (!fdef) return nullptr;
+    if (fdef->declarator && direct_declarator_has_varargs(fdef->declarator->direct)) {
+        std::cerr << "Error: variadic function definitions are unsupported" << std::endl;
+        hadError_ = true;
+        return nullptr;
+    }
 
     // 构建函数类型
     Type funcType = build_type(fdef->specs, fdef->declarator);
@@ -1286,6 +1316,53 @@ Value IRBuilder::build_call_expr(const std::shared_ptr<CallExpr>& call) {
             callee = sym->irFunction;
         }
     }
+
+    if (!callee) {
+        std::cerr << "Error: undefined function: " << funcName << std::endl;
+        hadError_ = true;
+        return nullptr;
+    }
+
+    auto fnType = extract_function_type(callee->ty);
+    if (!fnType) {
+        std::cerr << "Error: callee does not have a function type" << std::endl;
+        hadError_ = true;
+        return nullptr;
+    }
+
+    std::vector<ir::Type> fixedParamTypes;
+    fixedParamTypes.reserve(fnType->params.buffer.size());
+    for (const auto& item : fnType->params.buffer) {
+        if (std::holds_alternative<ir::Type>(item)) {
+            fixedParamTypes.push_back(std::get<ir::Type>(item));
+        }
+    }
+
+    if (args.size() < fixedParamTypes.size()) {
+        std::cerr << "Error: insufficient arguments for function call: " << funcName
+                  << std::endl;
+        hadError_ = true;
+        return nullptr;
+    }
+    if (!fnType->is_variadic && args.size() != fixedParamTypes.size()) {
+        std::cerr << "Error: mismatched argument count for function call: " << funcName
+                  << std::endl;
+        hadError_ = true;
+        return nullptr;
+    }
+    if (fnType->is_variadic) {
+        for (std::size_t i = fixedParamTypes.size(); i < args.size(); ++i) {
+            auto arg = args[i];
+            if (!arg || !arg->ty) continue;
+            if (is_float_type(arg->ty)) {
+                std::cerr << "Error: floating-point variadic arguments are unsupported"
+                          << std::endl;
+                hadError_ = true;
+                return nullptr;
+            }
+        }
+    }
+
     // 使用辅助接口创建调用
     return build_call(callee, args);
 }
@@ -1926,6 +2003,7 @@ Type IRBuilder::build_type(const std::shared_ptr<DeclSpec>& specs,
         Kind kind;
         std::size_t arraySize = 0;
         std::vector<Type> params;
+        bool isVariadic = false;
     };
 
     std::vector<TypeCtor> ctors;
@@ -1976,6 +2054,7 @@ Type IRBuilder::build_type(const std::shared_ptr<DeclSpec>& specs,
             }
             TypeCtor ctor{TypeCtor::Kind::Function, 0, {}};
             ctor.params = std::move(params);
+            ctor.isVariadic = ddCall->hasVarArgs;
             ctors.push_back(std::move(ctor));
             return;
         }
@@ -1999,7 +2078,7 @@ Type IRBuilder::build_type(const std::shared_ptr<DeclSpec>& specs,
                 result = build_array_type(result, it->arraySize);
                 break;
             case TypeCtor::Kind::Function:
-                result = build_function_type(result, it->params);
+                result = build_function_type(result, it->params, it->isVariadic);
                 break;
         }
     }
@@ -2027,12 +2106,14 @@ Type IRBuilder::build_array_type(Type base, std::size_t size) {
 // 常量构建
 // ============================================================================
 
-Type IRBuilder::build_function_type(Type ret, const std::vector<Type>& params) {
+Type IRBuilder::build_function_type(Type ret, const std::vector<Type>& params,
+                                    bool isVariadic) {
     auto ty = std::make_shared<TypeKind>();
     ty->tag = TypeTag::FUNCTION;
     ty->data = std::make_shared<TypeKind::function>();
     auto funcData = std::get<std::shared_ptr<TypeKind::function>>(ty->data);
     funcData->ret = ret;
+    funcData->is_variadic = isVariadic;
     funcData->params.kind = SliceItemKind::TYPE;
     for (auto &p : params) {
         funcData->params.buffer.push_back(p);

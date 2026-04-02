@@ -278,6 +278,10 @@ class IRTextDumper : public IRVisitor<IRTextDumper> {
             first = false;
             oss << type_to_string(std::get<Type>(param));
         }
+        if (fnType->is_variadic) {
+            if (!first) oss << ", ";
+            oss << "...";
+        }
         return oss.str();
     }
 
@@ -314,6 +318,10 @@ class IRTextDumper : public IRVisitor<IRTextDumper> {
                     if (!first) oss << ", ";
                     first = false;
                     oss << type_to_string(std::get<Type>(param));
+                }
+                if (fn->is_variadic) {
+                    if (!first) oss << ", ";
+                    oss << "...";
                 }
                 oss << ") -> " << type_to_string(fn->ret);
                 return oss.str();

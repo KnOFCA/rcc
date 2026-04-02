@@ -198,6 +198,7 @@ struct DDArray : DirectDeclarator {
 struct DDCall : DirectDeclarator {
     AST base; // DirectDeclarator
     std::vector<std::shared_ptr<ParameterDecl>> params;
+    bool hasVarArgs = false;
 };
 
 struct Declarator : ASTNode {
@@ -229,6 +230,7 @@ struct DAArray : DirectAbstractDeclarator {
 struct DACall : DirectAbstractDeclarator {
     std::shared_ptr<DirectAbstractDeclarator> base;
     std::vector<std::shared_ptr<ParameterDecl>> params;
+    bool hasVarArgs = false;
 };
 
 struct TypeName : ASTNode {

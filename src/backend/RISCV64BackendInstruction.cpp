@@ -311,14 +311,26 @@ BackendError RISCV64Backend::emit_instruction(const ir::Value& inst,
                 auto fn_type =
                     std::get<std::shared_ptr<ir::TypeKind::function>>(call.callee->ty->data);
                 if (fn_type && !fn_type->params.buffer.empty()) {
+                    std::size_t fixed_arg_count = 0;
                     for (const auto& item : fn_type->params.buffer) {
                         if (std::holds_alternative<ir::Type>(item)) {
                             arg_types.push_back(std::get<ir::Type>(item));
+                            ++fixed_arg_count;
                         }
                     }
-                    if (arg_types.size() != args.size()) {
+                    if (args.size() < arg_types.size()) {
                         return {BackendErrorCode::UNSUPPORTED_IR,
-                                "variadic or mismatched function calls are unsupported"};
+                                "insufficient arguments for function call"};
+                    }
+                    if (!fn_type->is_variadic && arg_types.size() != args.size()) {
+                        return {BackendErrorCode::UNSUPPORTED_IR,
+                                "mismatched function call arity is unsupported"};
+                    }
+                    if (fn_type->is_variadic) {
+                        for (std::size_t i = fixed_arg_count; i < args.size(); ++i) {
+                            auto arg = args[i];
+                            arg_types.push_back(arg ? arg->ty : nullptr);
+                        }
                     }
                 } else if (has_float_without_prototype && !args.empty()) {
                     return {BackendErrorCode::UNSUPPORTED_IR,
@@ -333,7 +345,8 @@ BackendError RISCV64Backend::emit_instruction(const ir::Value& inst,
             }
 
             detail::CallArgLayout arg_layout;
-            auto classify_result = detail::classify_call_arguments(arg_types, arg_layout);
+            auto classify_result =
+                detail::classify_call_arguments_for_call(call.callee, arg_types, arg_layout);
             if (!classify_result.ok()) {
                 return classify_result;
             }
@@ -383,13 +396,13 @@ BackendError RISCV64Backend::emit_instruction(const ir::Value& inst,
                                 arg_result = emit_value_to_freg(arg, "ft0", ctx, out);
                                 if (arg_result.ok()) {
                                     arg_result = emit_store_freg_to_address(
-                                        "ft0", addr_reg, arg ? arg->ty : nullptr, out);
+                                        "ft0", addr_reg, loc.type, out);
                                 }
                             } else {
                                 arg_result = emit_value_to_reg(arg, "t0", ctx, out);
                                 if (arg_result.ok()) {
                                     arg_result = emit_store_to_address(
-                                        "t0", addr_reg, arg ? arg->ty : nullptr, out);
+                                        "t0", addr_reg, loc.type, out);
                                 }
                             }
                         }

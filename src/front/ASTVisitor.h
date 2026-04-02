@@ -1047,7 +1047,9 @@ public:
 
     bool VisitDDCall(const std::shared_ptr<ast::DDCall>& dc) {
         if (!dc) return true;
-        std::cout << "DDCall (params: " << dc->params.size() << ")" << std::endl;
+        std::cout << "DDCall (params: " << dc->params.size()
+                  << ", hasVarArgs: " << (dc->hasVarArgs ? "true" : "false")
+                  << ")" << std::endl;
         return derived().TraverseDDCall(dc);
     }
 
@@ -1138,6 +1140,9 @@ public:
 
     bool VisitDACall(const std::shared_ptr<ast::DACall>& dac) {
         if (!dac) return true;
+        std::cout << "DACall (params: " << dac->params.size()
+                  << ", hasVarArgs: " << (dac->hasVarArgs ? "true" : "false")
+                  << ")" << std::endl;
         return derived().TraverseDACall(dac);
     }
 

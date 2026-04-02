@@ -186,7 +186,25 @@ inline bool is_integer_abi_scalar_type(ir::Type type) {
     return is_integer_scalar_type(type) || (type && type->tag == ir::TypeTag::POINTER);
 }
 
+inline ir::Type default_variadic_abi_type(ir::Type type) {
+    if (!type) {
+        return nullptr;
+    }
+    switch (type->tag) {
+        case ir::TypeTag::INT8:
+        case ir::TypeTag::INT16: {
+            auto widened = std::make_shared<ir::TypeKind>();
+            widened->tag = ir::TypeTag::INT32;
+            return widened;
+        }
+        default:
+            return type;
+    }
+}
+
 inline BackendError classify_call_arguments(const std::vector<ir::Type>& arg_types,
+                                            bool is_variadic,
+                                            std::size_t fixed_arg_count,
                                             CallArgLayout& layout) {
     std::size_t next_int_reg = 0;
     std::size_t next_float_reg = 0;
@@ -195,18 +213,26 @@ inline BackendError classify_call_arguments(const std::vector<ir::Type>& arg_typ
     layout.locations.clear();
     layout.locations.reserve(arg_types.size());
 
-    for (auto type : arg_types) {
+    for (std::size_t i = 0; i < arg_types.size(); ++i) {
+        auto type = arg_types[i];
+        const bool is_variadic_arg = is_variadic && i >= fixed_arg_count;
+        auto abi_type = is_variadic_arg ? default_variadic_abi_type(type) : type;
         RISCV64ArgLocation loc;
-        loc.type = type;
+        loc.type = abi_type;
 
-        if (is_float_scalar_type(type) && next_float_reg < 8) {
+        if (is_variadic_arg && is_float_scalar_type(type)) {
+            return {BackendErrorCode::UNSUPPORTED_TYPE,
+                    "floating-point variadic call arguments are unsupported"};
+        }
+
+        if (!is_variadic_arg && is_float_scalar_type(abi_type) && next_float_reg < 8) {
             loc.kind = RISCV64ArgLocation::Kind::FloatReg;
             loc.index = next_float_reg++;
             layout.locations.push_back(loc);
             continue;
         }
 
-        if (!is_integer_abi_scalar_type(type) && !is_float_scalar_type(type)) {
+        if (!is_integer_abi_scalar_type(abi_type) && !is_float_scalar_type(abi_type)) {
             return {BackendErrorCode::UNSUPPORTED_TYPE,
                     "only integer/pointer and FLOAT/DOUBLE scalar call arguments are supported"};
         }
@@ -247,12 +273,35 @@ inline BackendError classify_function_arguments(const ir::Function& function,
     }
 
     CallArgLayout layout;
-    auto result = classify_call_arguments(param_types, layout);
+    auto result = classify_call_arguments(param_types, false, param_types.size(), layout);
     if (!result.ok()) {
         return result;
     }
     locations = std::move(layout.locations);
     return BackendError::success();
+}
+
+inline BackendError classify_call_arguments_for_call(const ir::Function& callee,
+                                                     const std::vector<ir::Type>& provided_arg_types,
+                                                     CallArgLayout& layout) {
+    bool is_variadic = false;
+    std::size_t fixed_arg_count = provided_arg_types.size();
+
+    if (callee && callee->ty && callee->ty->tag == ir::TypeTag::FUNCTION) {
+        auto fn_type =
+            std::get<std::shared_ptr<ir::TypeKind::function>>(callee->ty->data);
+        if (fn_type) {
+            fixed_arg_count = 0;
+            for (const auto& item : fn_type->params.buffer) {
+                if (std::holds_alternative<ir::Type>(item)) {
+                    ++fixed_arg_count;
+                }
+            }
+            is_variadic = fn_type->is_variadic;
+        }
+    }
+
+    return classify_call_arguments(provided_arg_types, is_variadic, fixed_arg_count, layout);
 }
 
 inline const char* float_move_suffix(ir::Type type) {

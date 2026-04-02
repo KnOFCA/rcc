@@ -212,7 +212,8 @@ pointer
     ;
 
 parameterTypeList
-    : parameterList
+    : parameterList (Comma Ellipsis)?
+    | Ellipsis
     ;
 
 parameterList

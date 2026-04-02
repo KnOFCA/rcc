@@ -31,6 +31,7 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
     std::unordered_map<std::string, Value> stringLiteralGlobals_;
     std::size_t stringLiteralCounter_ = 0;
     long tempCounter_ = 0;
+    bool hadError_ = false;
     
     // 从 AST 生成 IR 程序
     ErrorCode build_from_AST(std::shared_ptr<ast::TranslationUnit> node);
@@ -95,7 +96,8 @@ class IRBuilder : public front::ASTVisitor<IRBuilder> {
     Type build_array_type(Type base, std::size_t size);
 
     // 处理函数类型
-    Type build_function_type(Type ret, const std::vector<Type>& params);
+    Type build_function_type(Type ret, const std::vector<Type>& params,
+                             bool isVariadic = false);
 
     // 常量生成
     Value build_integer_const(int32_t value);

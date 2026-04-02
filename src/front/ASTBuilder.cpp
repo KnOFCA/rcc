@@ -14,6 +14,15 @@
 
 using namespace rcc::front;
 
+namespace {
+
+struct ParsedParameterTypeList {
+    std::vector<std::shared_ptr<ast::ParameterDecl>> params;
+    bool hasVarArgs{false};
+};
+
+} // namespace
+
 std::any ASTBuilder::visitTranslationUnit(TParser::TranslationUnitContext *ctx) {
     auto tu = std::make_shared<ast::TranslationUnit>();
 
@@ -302,7 +311,9 @@ std::any ASTBuilder::visitDirectDeclarator(TParser::DirectDeclaratorContext *ctx
         }
         if(ctx->parameterTypeList()){
             auto v = visit(ctx->parameterTypeList());
-            call->params = std::any_cast<std::vector<std::shared_ptr<ast::ParameterDecl>>>(v);
+            auto parsed = std::any_cast<ParsedParameterTypeList>(v);
+            call->params = std::move(parsed.params);
+            call->hasVarArgs = parsed.hasVarArgs;
         }
         return std::static_pointer_cast<ast::DirectDeclarator>(call);
     }
@@ -329,7 +340,14 @@ std::any ASTBuilder::visitPointer(TParser::PointerContext *ctx) {
 }
 
 std::any ASTBuilder::visitParameterTypeList(TParser::ParameterTypeListContext *ctx) {
-    return visitChildren(ctx);
+    ParsedParameterTypeList parsed;
+    parsed.hasVarArgs = ctx->Ellipsis() != nullptr;
+    if (ctx->parameterList()) {
+        auto v = visit(ctx->parameterList());
+        parsed.params =
+            std::any_cast<std::vector<std::shared_ptr<ast::ParameterDecl>>>(v);
+    }
+    return parsed;
 }
 
 std::any ASTBuilder::visitParameterList(TParser::ParameterListContext *ctx) {
@@ -1204,7 +1222,9 @@ std::any ASTBuilder::visitDirectAbstractDeclarator(TParser::DirectAbstractDeclar
             call->base = std::any_cast<std::shared_ptr<ast::DirectAbstractDeclarator>>(v);
             if (ctx->parameterTypeList()) {
                 v = visit(ctx->parameterTypeList());
-                call->params = std::any_cast<std::vector<std::shared_ptr<ast::ParameterDecl>>>(v);
+                auto parsed = std::any_cast<ParsedParameterTypeList>(v);
+                call->params = std::move(parsed.params);
+                call->hasVarArgs = parsed.hasVarArgs;
             }
             return std::static_pointer_cast<ast::DirectAbstractDeclarator>(call);
         }

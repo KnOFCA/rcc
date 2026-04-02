@@ -172,14 +172,33 @@ BackendError RISCV64Backend::build_frame_layout(const ir::Function& function,
                     auto fn_type =
                         std::get<std::shared_ptr<ir::TypeKind::function>>(call.callee->ty->data);
                     if (fn_type && !fn_type->params.buffer.empty()) {
+                        std::size_t fixed_arg_count = 0;
                         for (const auto& item : fn_type->params.buffer) {
                             if (std::holds_alternative<ir::Type>(item)) {
                                 arg_types.push_back(std::get<ir::Type>(item));
+                                ++fixed_arg_count;
                             }
                         }
-                        if (arg_types.size() != arg_count) {
+                        if (arg_count < arg_types.size()) {
                             return {BackendErrorCode::UNSUPPORTED_IR,
-                                    "variadic or mismatched function calls are unsupported"};
+                                    "insufficient arguments for function call"};
+                        }
+                        if (!fn_type->is_variadic && arg_types.size() != arg_count) {
+                            return {BackendErrorCode::UNSUPPORTED_IR,
+                                    "mismatched function call arity is unsupported"};
+                        }
+                        if (fn_type->is_variadic) {
+                            std::size_t actual_index = 0;
+                            for (const auto& arg_item : call.args.buffer) {
+                                if (!std::holds_alternative<ir::Value>(arg_item)) {
+                                    continue;
+                                }
+                                auto arg = std::get<ir::Value>(arg_item);
+                                if (actual_index++ < fixed_arg_count) {
+                                    continue;
+                                }
+                                arg_types.push_back(arg ? arg->ty : nullptr);
+                            }
                         }
                     } else if (has_float_without_prototype && arg_count != 0) {
                         return {BackendErrorCode::UNSUPPORTED_IR,
@@ -198,7 +217,8 @@ BackendError RISCV64Backend::build_frame_layout(const ir::Function& function,
                 }
 
                 detail::CallArgLayout arg_layout;
-                auto classify_result = detail::classify_call_arguments(arg_types, arg_layout);
+                auto classify_result =
+                    detail::classify_call_arguments_for_call(call.callee, arg_types, arg_layout);
                 if (!classify_result.ok()) {
                     return classify_result;
                 }

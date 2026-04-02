@@ -129,6 +129,7 @@ struct TypeKind {
     struct function {
         Slice params;
         std::shared_ptr<TypeKind> ret;
+        bool is_variadic{false};
     };
 
     using Data = std::variant<std::shared_ptr<array>, 
