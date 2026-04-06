@@ -485,6 +485,28 @@ BackendError RISCV64Backend::emit_instruction(const ir::Value& inst,
                     out << "  fcvt." << dst_suffix << "." << src_suffix << " t0, ft0\n";
                     return emit_store_reg_to_slot("t0", slot_it->second, inst->ty, out);
                 }
+                case detail::CastClassification::INTCAST: {
+                    auto load_result = emit_value_to_reg(cast.value, "t0", ctx, out);
+                    if (!load_result.ok()) {
+                        return load_result;
+                    }
+                    return emit_store_reg_to_slot("t0", slot_it->second, inst->ty, out);
+                }
+                case detail::CastClassification::FPEXT:
+                case detail::CastClassification::FPTRUNC: {
+                    auto load_result = emit_value_to_freg(cast.value, "ft0", ctx, out);
+                    if (!load_result.ok()) {
+                        return load_result;
+                    }
+                    const char* src_suffix = detail::float_suffix(cast.value->ty);
+                    const char* dst_suffix = detail::float_suffix(inst->ty);
+                    if (!src_suffix || !dst_suffix) {
+                        return {BackendErrorCode::INVALID_PROGRAM,
+                                "float cast source/target type must be FLOAT or DOUBLE"};
+                    }
+                    out << "  fcvt." << dst_suffix << "." << src_suffix << " ft1, ft0\n";
+                    return emit_store_freg_to_slot("ft1", slot_it->second, inst->ty, out);
+                }
             }
 
             return {BackendErrorCode::INVALID_PROGRAM,

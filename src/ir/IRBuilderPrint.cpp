@@ -437,6 +437,9 @@ class IRTextDumper : public IRVisitor<IRTextDumper> {
         switch (op) {
             case CastOp::SITOFP: return "sitofp";
             case CastOp::FPTOSI: return "fptosi";
+            case CastOp::INTCAST: return "intcast";
+            case CastOp::FPEXT: return "fpext";
+            case CastOp::FPTRUNC: return "fptrunc";
         }
         return "sitofp";
     }

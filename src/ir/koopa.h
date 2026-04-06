@@ -384,7 +384,13 @@ enum class CastOp : uint32_t {
     /// Signed integer to floating point.
     SITOFP,
     /// Floating point to signed integer.
-    FPTOSI
+    FPTOSI,
+    /// Integer scalar conversion with storage-width semantics.
+    INTCAST,
+    /// Floating point widening conversion.
+    FPEXT,
+    /// Floating point narrowing conversion.
+    FPTRUNC
 };
 
 ///

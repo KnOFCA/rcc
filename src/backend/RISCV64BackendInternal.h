@@ -109,6 +109,9 @@ inline const char* float_suffix(ir::Type type) {
 enum class CastClassification {
     SITOFP,
     FPTOSI,
+    INTCAST,
+    FPEXT,
+    FPTRUNC,
 };
 
 inline CastClassification classify_cast(const ir::Value& inst) {
@@ -118,6 +121,12 @@ inline CastClassification classify_cast(const ir::Value& inst) {
             return CastClassification::SITOFP;
         case ir::CastOp::FPTOSI:
             return CastClassification::FPTOSI;
+        case ir::CastOp::INTCAST:
+            return CastClassification::INTCAST;
+        case ir::CastOp::FPEXT:
+            return CastClassification::FPEXT;
+        case ir::CastOp::FPTRUNC:
+            return CastClassification::FPTRUNC;
     }
 
     return CastClassification::SITOFP;
@@ -155,6 +164,27 @@ inline BackendError validate_cast_operands(const ir::Value& inst,
             if (!is_integer_scalar_type(inst->ty)) {
                 return {BackendErrorCode::INVALID_PROGRAM,
                         "fptosi target type is not a supported integer scalar"};
+            }
+            return BackendError::success();
+        case CastClassification::INTCAST:
+            if (!is_integer_scalar_type(cast.value->ty)) {
+                return {BackendErrorCode::UNSUPPORTED_TYPE,
+                        "intcast source type is not a supported integer scalar"};
+            }
+            if (!is_integer_scalar_type(inst->ty)) {
+                return {BackendErrorCode::INVALID_PROGRAM,
+                        "intcast target type is not a supported integer scalar"};
+            }
+            return BackendError::success();
+        case CastClassification::FPEXT:
+        case CastClassification::FPTRUNC:
+            if (!is_float_scalar_type(cast.value->ty)) {
+                return {BackendErrorCode::UNSUPPORTED_TYPE,
+                        "float cast source type is not FLOAT or DOUBLE"};
+            }
+            if (!is_float_scalar_type(inst->ty)) {
+                return {BackendErrorCode::INVALID_PROGRAM,
+                        "float cast target type must be FLOAT or DOUBLE"};
             }
             return BackendError::success();
     }

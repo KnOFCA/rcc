@@ -155,6 +155,19 @@ bool is_float_type(Type ty) {
     return ty->tag == TypeTag::FLOAT || ty->tag == TypeTag::DOUBLE;
 }
 
+std::size_t scalar_type_bits(Type ty) {
+    if (!ty) return 0;
+    switch (ty->tag) {
+        case TypeTag::INT8: return 8;
+        case TypeTag::INT16: return 16;
+        case TypeTag::INT32: return 32;
+        case TypeTag::INT64: return 64;
+        case TypeTag::FLOAT: return 32;
+        case TypeTag::DOUBLE: return 64;
+        default: return 0;
+    }
+}
+
 Value make_number_value(const Number::number& num, TypeTag tag) {
     auto value = std::make_shared<ValueData>();
     value->kind.tag = ValueTag::NUMBER;
@@ -186,8 +199,21 @@ std::optional<long double> number_to_long_double(const Number::number& num) {
     return std::nullopt;
 }
 
+bool is_integer_zero_number(const Number::number& num) {
+    if (std::holds_alternative<Integer8>(num)) return std::get<Integer8>(num).value == 0;
+    if (std::holds_alternative<Integer16>(num)) return std::get<Integer16>(num).value == 0;
+    if (std::holds_alternative<Integer32>(num)) return std::get<Integer32>(num).value == 0;
+    if (std::holds_alternative<Integer64>(num)) return std::get<Integer64>(num).value == 0;
+    return false;
+}
+
 Value convert_constant_number(const Number::number& num, Type ty) {
     if (!ty) return nullptr;
+
+    if (ty->tag == TypeTag::POINTER) {
+        if (!is_integer_zero_number(num)) return nullptr;
+        return make_number_value(Integer64{0}, TypeTag::POINTER);
+    }
 
     auto as_ld = number_to_long_double(num);
     if (!as_ld.has_value()) return nullptr;
@@ -298,6 +324,74 @@ Type pointee_type(Type ptrTy) {
     auto ptr = std::get<std::shared_ptr<TypeKind::pointer>>(ptrTy->data);
     if (!ptr) return nullptr;
     return ptr->base;
+}
+
+Value normalize_value_for_type(IRBuilder& builder, Value value, Type targetTy) {
+    if (!value || !targetTy) return value;
+    if (!value->ty) return value;
+
+    if (targetTy->tag == TypeTag::POINTER) {
+        if (value->ty->tag == TypeTag::POINTER) return value;
+        if (value->kind.tag == ValueTag::NUMBER) {
+            const auto& number = std::get<Number>(value->kind.data);
+            if (auto converted = convert_constant_number(number.num, targetTy)) {
+                return converted;
+            }
+        }
+        return value;
+    }
+
+    if (value->ty->tag == targetTy->tag) {
+        if (value->kind.tag == ValueTag::NUMBER) {
+            const auto& number = std::get<Number>(value->kind.data);
+            if (auto converted = convert_constant_number(number.num, targetTy)) {
+                return converted;
+            }
+        }
+        return value;
+    }
+
+    if (value->kind.tag == ValueTag::NUMBER) {
+        const auto& number = std::get<Number>(value->kind.data);
+        if (auto converted = convert_constant_number(number.num, targetTy)) {
+            return converted;
+        }
+    }
+
+    if (is_integer_type(value->ty) && is_integer_type(targetTy)) {
+        return builder.build_cast(CastOp::INTCAST, value, targetTy);
+    }
+    if (is_integer_type(value->ty) && is_float_type(targetTy)) {
+        return builder.build_cast(CastOp::SITOFP, value, targetTy);
+    }
+    if (is_float_type(value->ty) && is_integer_type(targetTy)) {
+        return builder.build_cast(CastOp::FPTOSI, value, targetTy);
+    }
+    if (is_float_type(value->ty) && is_float_type(targetTy)) {
+        return builder.build_cast(
+            scalar_type_bits(value->ty) < scalar_type_bits(targetTy) ? CastOp::FPEXT
+                                                                     : CastOp::FPTRUNC,
+            value, targetTy);
+    }
+
+    return value;
+}
+
+Value build_zero_scalar_constant(Type ty) {
+    if (!ty) return nullptr;
+    switch (ty->tag) {
+        case TypeTag::INT8:
+        case TypeTag::INT16:
+        case TypeTag::INT32:
+        case TypeTag::INT64:
+            return convert_constant_number(Number::number{Integer32{0}}, ty);
+        case TypeTag::FLOAT:
+            return convert_constant_number(Number::number{Float{0.0f}}, ty);
+        case TypeTag::DOUBLE:
+            return convert_constant_number(Number::number{Double{0.0}}, ty);
+        default:
+            return nullptr;
+    }
 }
 
 std::shared_ptr<ast::Declarator> declarator_from_parameter_ast(const ast::AST& node) {
@@ -625,6 +719,22 @@ Function IRBuilder::build_function(const std::shared_ptr<FunctionDef>& fdef) {
     // 处理函数体
     if (auto body = std::dynamic_pointer_cast<CompoundStmt>(fdef->body)) {
         build_compound_stmt(body);
+    }
+
+    if (!current_block_terminated()) {
+        auto fnType = extract_function_type(funcType);
+        Type retTy = fnType ? fnType->ret : nullptr;
+        if (!retTy || retTy->tag == TypeTag::UNIT) {
+            build_ret();
+        } else {
+            std::string fnName = funcData->name.value_or("<anonymous>");
+            if (!fnName.empty() && fnName[0] == '@') {
+                fnName.erase(fnName.begin());
+            }
+            std::cerr << "Error: non-void function may reach end without return: "
+                      << fnName << std::endl;
+            hadError_ = true;
+        }
     }
     
     // 离开作用域
@@ -1214,6 +1324,21 @@ Value IRBuilder::build_unary_expr(const std::shared_ptr<UnaryExpr>& un) {
             return build_load(operand);
         case opcode::AMP:   // 取地址
             return build_lvalue(std::dynamic_pointer_cast<Expr>(un->operand));
+        case opcode::ADD:
+            return operand;
+        case opcode::SUB: {
+            Value zero = operand && operand->ty ? build_zero_scalar_constant(operand->ty)
+                                                : build_integer_const(0);
+            if (!zero || !operand) return nullptr;
+            return build_binary(BinaryOp::SUB, zero, operand);
+        }
+        case opcode::NONE: {
+            Value zero = operand && operand->ty ? build_zero_scalar_constant(operand->ty)
+                                                : build_integer_const(0);
+            if (!operand) return nullptr;
+            if (!zero) zero = build_integer_const(0);
+            return build_binary(BinaryOp::EQ, operand, zero);
+        }
         case opcode::MINUSMINUS:
         case opcode::PLUSPLUS: {
             // 前缀 ++/--: 先修改再返回
@@ -1713,6 +1838,14 @@ Value IRBuilder::build_cast_expr(const std::shared_ptr<CastExpr>& cast) {
     if (is_float_type(src->ty) && is_integer_type(dstTy)) {
         return build_cast(CastOp::FPTOSI, src, dstTy);
     }
+    if (is_integer_type(src->ty) && is_integer_type(dstTy)) {
+        return build_cast(CastOp::INTCAST, src, dstTy);
+    }
+    if (is_float_type(src->ty) && is_float_type(dstTy)) {
+        return build_cast(scalar_type_bits(src->ty) < scalar_type_bits(dstTy) ? CastOp::FPEXT
+                                                                               : CastOp::FPTRUNC,
+                          src, dstTy);
+    }
 
     return src;
 }
@@ -1870,6 +2003,12 @@ Value IRBuilder::build_load(Value ptr) {
 
 void IRBuilder::build_store(Value value, Value ptr) {
     if (!value || !ptr) return;
+    Type targetTy = pointee_type(ptr->ty);
+    if (targetTy &&
+        (is_integer_type(targetTy) || is_float_type(targetTy) || targetTy->tag == TypeTag::POINTER)) {
+        value = normalize_value_for_type(*this, value, targetTy);
+        if (!value) return;
+    }
     
     auto valData = std::make_shared<ValueData>();
     valData->kind.tag = ValueTag::STORE;
