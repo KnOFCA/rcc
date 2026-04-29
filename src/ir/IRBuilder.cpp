@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 #include "IRBuilder.h"
 #include "ir/koopa.h"
 #include <iostream>

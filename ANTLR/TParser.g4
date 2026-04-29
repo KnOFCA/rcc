@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 parser grammar TParser;
 
 options {

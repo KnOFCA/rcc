@@ -1,0 +1,30 @@
+fun @main(): i32 {
+%entry:
+  %x = alloc i32
+  store 1, %x
+  %y = alloc i32
+  store 2, %y
+  jump %while.cond
+%while.cond:
+  %2 = load %x
+  %3 = lt %2, 7
+  br %3, %while.body, %while.end
+%while.body:
+  %4 = load %y
+  %5 = load %x
+  %6 = add %4, %5
+  store %6, %y
+  %7 = load %x
+  %8 = add %7, 1
+  store %8, %x
+  jump %while.cond
+%while.end:
+  %9 = load %y
+  %10 = gt %9, 20
+  br %10, %if.then, %if.merge
+%if.then:
+  %11 = load %y
+  ret %11
+%if.merge:
+  ret 0
+}

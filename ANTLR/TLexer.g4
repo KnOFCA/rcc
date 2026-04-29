@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 lexer grammar TLexer;
 
 // These are all supported lexer sections:

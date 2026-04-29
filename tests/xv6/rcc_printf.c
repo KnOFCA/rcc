@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 void fprintf(int fd, const char *fmt, ...);
 void exit(int);
 

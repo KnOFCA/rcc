@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 int fork(void);
 int wait(int *);
 int pipe(int *);

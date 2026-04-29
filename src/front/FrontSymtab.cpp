@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 #include "FrontSymtab.h"
 #include <cassert>
 #include <stdexcept>

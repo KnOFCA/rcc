@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 #include "IRVisitor.h"
 
 namespace rcc::ir::detail {

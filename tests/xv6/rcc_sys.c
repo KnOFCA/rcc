@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 int getpid(void);
 int write(int, char *, int);
 void exit(int);

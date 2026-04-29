@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 #include "FrontSymtabCollector.h"
 
 using namespace rcc::front;

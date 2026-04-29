@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 int write(int, char *, int);
 int fork(void);
 int wait(int *);

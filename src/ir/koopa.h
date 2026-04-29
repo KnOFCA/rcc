@@ -1,3 +1,5 @@
+// Author: KnOFCA
+
 #pragma once
 
 #include <cmath>
